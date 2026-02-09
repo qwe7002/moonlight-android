@@ -3,7 +3,6 @@ package com.limelight.discovery;
 import java.util.List;
 
 import com.limelight.nvstream.mdns.MdnsComputer;
-import com.limelight.nvstream.mdns.JmDNSDiscoveryAgent;
 import com.limelight.nvstream.mdns.MdnsDiscoveryAgent;
 import com.limelight.nvstream.mdns.MdnsDiscoveryListener;
 import com.limelight.nvstream.mdns.NsdManagerDiscoveryAgent;
@@ -63,12 +62,8 @@ public class DiscoveryService extends Service {
         //
         // As such, we use the jmDNS-based MdnsDiscoveryAgent prior to Android 14 and NsdManager
         // on Android 14 and above.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            discoveryAgent = new JmDNSDiscoveryAgent(getApplicationContext(), listener);
-        }
-        else {
-            discoveryAgent = new NsdManagerDiscoveryAgent(getApplicationContext(), listener);
-        }
+        discoveryAgent = new NsdManagerDiscoveryAgent(getApplicationContext(), listener);
+
     }
 
     private final DiscoveryBinder binder = new DiscoveryBinder();

@@ -19,6 +19,7 @@ android {
 
         // Only support 64-bit ARM architecture (remove armv7 and x86 support)
         ndk {
+            //noinspection ChromeOsAbiSupport
             abiFilters 'arm64-v8a'
         }
 
@@ -29,6 +30,11 @@ android {
         buildConfig = true
     }
 
+    packaging {
+        resources {
+            excludes += ['META-INF/versions/9/OSGI-INF/MANIFEST.MF']
+        }
+    }
 
     compileOptions {
         encoding "UTF-8"
@@ -108,10 +114,10 @@ android {
 }
 
 dependencies {
-    implementation 'org.bouncycastle:bcprov-jdk18on:1.77'
-    implementation 'org.bouncycastle:bcpkix-jdk18on:1.77'
+
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.83'
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.83'
     implementation 'org.jcodec:jcodec:0.2.5'
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-    implementation 'org.jmdns:jmdns:3.5.9'
+    implementation 'com.squareup.okhttp3:okhttp:5.3.2'
     implementation 'com.github.cgutman:ShieldControllerExtensions:1.0.1'
 }
