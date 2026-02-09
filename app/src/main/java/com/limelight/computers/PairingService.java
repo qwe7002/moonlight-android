@@ -152,9 +152,8 @@ public class PairingService extends Service {
                 host = "[" + host + "]";
             }
 
-            // Use the HTTPS port for the web interface (default 47984)
-            int port = httpsPort > 0 ? httpsPort : 47984;
-            String url = "https://" + host + ":" + port;
+            // Use port 47990 for the web interface
+            String url = "https://" + host + ":47990";
 
             Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

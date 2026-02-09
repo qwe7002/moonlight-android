@@ -8,7 +8,6 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.os.Build;
 
 import com.limelight.Game;
 import com.limelight.LimeLog;
@@ -47,45 +46,65 @@ public class StatsNotificationHelper {
 
     private String simplifyStatsText(String statsText) {
         // Parse the stats text and extract key metrics only
-        // Expected format: "H.264 60.00 FPS 1920x1080 15.20 Mbps RTT: 2 ms (variance: 0 ms)"
+        // Expected multi-line format:
+        // Video stream: 1920x1080 60.00 FPS
+        // Decoder: OMX.xxx.decoder
+        // Incoming frame rate from network: 60.00 FPS
+        // Rendering frame rate: 60.00 FPS
+        // Frames dropped by your network connection: 0.00%
+        // Average network latency: 2 ms (variance: 0 ms)
+        // Average decoding time: 1.50 ms
         try {
             StringBuilder simplified = new StringBuilder();
+            String[] lines = statsText.split("\n");
 
-            // Extract FPS
-            if (statsText.contains("FPS")) {
-                int fpsEnd = statsText.indexOf("FPS");
-                // Find the start of FPS number (look backwards for space)
-                int fpsStart = statsText.lastIndexOf(' ', fpsEnd - 1);
-                if (fpsStart >= 0 && fpsEnd > fpsStart) {
-                    String fps = statsText.substring(fpsStart + 1, fpsEnd).trim();
-                    simplified.append(fps).append(" FPS");
-                }
-            }
-
-            // Extract bitrate
-            if (statsText.contains("Mbps")) {
-                int mbpsEnd = statsText.indexOf("Mbps");
-                // Find the start of Mbps number (look backwards for space)
-                int mbpsStart = statsText.lastIndexOf(' ', mbpsEnd - 1);
-                if (mbpsStart >= 0 && mbpsEnd > mbpsStart) {
-                    String bitrate = statsText.substring(mbpsStart + 1, mbpsEnd).trim();
-                    if (simplified.length() > 0) {
-                        simplified.append(" | ");
+            for (String line : lines) {
+                // Extract resolution and FPS from Video stream line
+                if (line.contains("Video stream:") && line.contains("FPS")) {
+                    // Extract resolution (e.g., 1920x1080)
+                    int colonIndex = line.indexOf(":");
+                    if (colonIndex >= 0) {
+                        String afterColon = line.substring(colonIndex + 1).trim();
+                        int spaceIndex = afterColon.indexOf(' ');
+                        if (spaceIndex > 0) {
+                            String resolution = afterColon.substring(0, spaceIndex).trim();
+                            simplified.append(resolution);
+                        }
                     }
-                    simplified.append(bitrate).append(" Mbps");
-                }
-            }
-
-            // Extract RTT (ping)
-            if (statsText.contains("RTT:")) {
-                int rttStart = statsText.indexOf("RTT:") + 4;
-                int rttEnd = statsText.indexOf("ms", rttStart);
-                if (rttEnd > rttStart) {
-                    String rtt = statsText.substring(rttStart, rttEnd).trim();
-                    if (simplified.length() > 0) {
-                        simplified.append(" | ");
+                    // Extract FPS
+                    int fpsEnd = line.lastIndexOf("FPS");
+                    int fpsStart = line.lastIndexOf(' ', fpsEnd - 2);
+                    if (fpsStart >= 0 && fpsEnd > fpsStart) {
+                        String fps = line.substring(fpsStart + 1, fpsEnd).trim();
+                        if (simplified.length() > 0) {
+                            simplified.append(" ");
+                        }
+                        simplified.append(fps).append(" FPS");
                     }
-                    simplified.append(rtt).append(" ms");
+                }
+                // Extract network latency
+                else if (line.contains("latency:")) {
+                    int latencyStart = line.indexOf(":") + 1;
+                    int latencyEnd = line.indexOf("ms");
+                    if (latencyStart > 0 && latencyEnd > latencyStart) {
+                        String latency = line.substring(latencyStart, latencyEnd).trim();
+                        if (simplified.length() > 0) {
+                            simplified.append(" | ");
+                        }
+                        simplified.append("RTT ").append(latency).append(" ms");
+                    }
+                }
+                // Extract decoding time
+                else if (line.contains("decoding time:")) {
+                    int decStart = line.indexOf(":") + 1;
+                    int decEnd = line.indexOf("ms");
+                    if (decStart > 0 && decEnd > decStart) {
+                        String decTime = line.substring(decStart, decEnd).trim();
+                        if (simplified.length() > 0) {
+                            simplified.append(" | ");
+                        }
+                        simplified.append("Dec ").append(decTime).append(" ms");
+                    }
                 }
             }
 
@@ -106,11 +125,12 @@ public class StatsNotificationHelper {
         // Simplify the stats text
         String simplifiedStats = simplifyStatsText(statsText);
 
-        // Add codec info if available
-        String title = context.getString(R.string.stats_notification_title);
+        // Prepend decoder info to content if available
         if (videoCodec != null && !videoCodec.isEmpty() && !videoCodec.equals("Unknown")) {
-            title = videoCodec + " - " + context.getString(R.string.stats_notification_title);
+            simplifiedStats = videoCodec + " | " + simplifiedStats;
         }
+
+        String title = context.getString(R.string.stats_notification_title);
 
         Intent intent = new Intent(context, Game.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -151,3 +171,4 @@ public class StatsNotificationHelper {
         return isShowing;
     }
 }
+

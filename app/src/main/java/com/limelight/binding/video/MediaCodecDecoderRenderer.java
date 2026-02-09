@@ -70,6 +70,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
     private boolean refFrameInvalidationActive;
     private int initialWidth, initialHeight;
     private int videoFormat;
+    private String activeDecoderName;
     private SurfaceHolder renderTarget;
     private volatile boolean stopping;
     private CrashListener crashListener;
@@ -458,6 +459,10 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         return this.videoFormat;
     }
 
+    public String getActiveDecoderName() {
+        return this.activeDecoderName;
+    }
+
     private MediaFormat createBaseMediaFormat(String mimeType) {
         MediaFormat videoFormat = MediaFormat.createVideoFormat(mimeType, initialWidth, initialHeight);
 
@@ -564,6 +569,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
             videoDecoder = MediaCodec.createByCodecName(selectedDecoderInfo.getName());
             configureAndStartDecoder(format);
             LimeLog.info("Using codec " + selectedDecoderInfo.getName() + " for hardware decoding " + format.getString(MediaFormat.KEY_MIME));
+            activeDecoderName = selectedDecoderInfo.getName();
             configured = true;
         } catch (IllegalArgumentException e) {
             e.printStackTrace();

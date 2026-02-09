@@ -2414,7 +2414,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
                     Surface.CHANGE_FRAME_RATE_ALWAYS);
         }
-        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        else {
             holder.getSurface().setFrameRate(desiredFrameRate,
                     Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
         }
@@ -2460,8 +2460,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             public void run() {
                 // Update active video codec info
                 if (decoderRenderer != null) {
-                    int videoFormat = decoderRenderer.getActiveVideoFormat();
-                    activeVideoCodec = getVideoCodecName(videoFormat);
+                    String decoderName = decoderRenderer.getActiveDecoderName();
+                    if (decoderName != null && !decoderName.isEmpty()) {
+                        activeVideoCodec = decoderName;
+                    } else {
+                        int videoFormat = decoderRenderer.getActiveVideoFormat();
+                        activeVideoCodec = getVideoCodecName(videoFormat);
+                    }
                 }
 
                 performanceOverlayView.setText(text);
