@@ -11,7 +11,7 @@ android {
         minSdk 34
         targetSdk 36
 
-        versionName "12.1"
+        versionName "13"
         versionCode = 314
 
         // Generate native debug symbols to allow Google Play to symbolicate our native crashes
@@ -118,4 +118,6 @@ dependencies {
     implementation 'org.jcodec:jcodec:0.2.5'
     implementation 'com.squareup.okhttp3:okhttp:5.3.2'
     implementation 'com.github.cgutman:ShieldControllerExtensions:1.0.1'
+    implementation 'com.tencent:mmkv:2.3.0'
 }
+

@@ -1,11 +1,13 @@
 package com.limelight.utils;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 
 import com.limelight.Game;
 import com.limelight.R;
@@ -37,7 +39,16 @@ public class StatsNotificationHelper {
         notificationManager.createNotificationChannel(channel);
     }
 
+    private boolean hasNotificationPermission() {
+        return context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+    }
+
     public void showNotification(String statsText) {
+        // Check for notification permission before attempting to show
+        if (!hasNotificationPermission()) {
+            return;
+        }
+
         Intent intent = new Intent(context, Game.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pendingIntent = PendingIntent.getActivity(

@@ -1,88 +1,55 @@
 package com.limelight.computers;
 
+import android.content.Context;
+import android.util.Base64;
+import android.util.Log;
+
+import com.limelight.nvstream.http.ComputerDetails;
+import com.limelight.nvstream.http.NvHTTP;
+import com.tencent.mmkv.MMKV;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.ByteArrayInputStream;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-
-import com.limelight.LimeLog;
-import com.limelight.nvstream.http.ComputerDetails;
-import com.limelight.nvstream.http.NvHTTP;
-
-import android.content.ContentValues;
-import android.content.Context;
-import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteException;
-
-import org.json.JSONException;
-import org.json.JSONObject;
 
 public class ComputerDatabaseManager {
-    private static final String COMPUTER_DB_NAME = "computers4.db";
-    private static final String COMPUTER_TABLE_NAME = "Computers";
-    private static final String COMPUTER_UUID_COLUMN_NAME = "UUID";
-    private static final String COMPUTER_NAME_COLUMN_NAME = "ComputerName";
-    private static final String ADDRESSES_COLUMN_NAME = "Addresses";
-    private interface AddressFields {
-        String LOCAL = "local";
-        String REMOTE = "remote";
-        String MANUAL = "manual";
-        String IPv6 = "ipv6";
+    private static final String MMKV_ID = "computers_mmkv";
+    private static final String COMPUTERS_LIST_KEY = "computer_uuids";
+    private static final String TAG = "ComputerDatabaseManager";
 
+    private interface ComputerFields {
+        String UUID = "uuid";
+        String NAME = "name";
+        String LOCAL_ADDRESS = "localAddress";
+        String REMOTE_ADDRESS = "remoteAddress";
+        String MANUAL_ADDRESS = "manualAddress";
+        String IPV6_ADDRESS = "ipv6Address";
+        String MAC_ADDRESS = "macAddress";
+        String SERVER_CERT = "serverCert";
+    }
+
+    private interface AddressFields {
         String ADDRESS = "address";
         String PORT = "port";
     }
 
-    private static final String MAC_ADDRESS_COLUMN_NAME = "MacAddress";
-    private static final String SERVER_CERT_COLUMN_NAME = "ServerCert";
-
-    private SQLiteDatabase computerDb;
+    private final MMKV mmkv;
 
     public ComputerDatabaseManager(Context c) {
-        try {
-            // Create or open an existing DB
-            computerDb = c.openOrCreateDatabase(COMPUTER_DB_NAME, 0, null);
-        } catch (SQLiteException e) {
-            // Delete the DB and try again
-            c.deleteDatabase(COMPUTER_DB_NAME);
-            computerDb = c.openOrCreateDatabase(COMPUTER_DB_NAME, 0, null);
-        }
-        initializeDb(c);
+        MMKV.initialize(c);
+        mmkv = MMKV.mmkvWithID(MMKV_ID);
     }
 
     public void close() {
-        computerDb.close();
-    }
-
-    private void initializeDb(Context c) {
-        // Create tables if they aren't already there
-        computerDb.execSQL(String.format((Locale)null,
-                "CREATE TABLE IF NOT EXISTS %s(%s TEXT PRIMARY KEY, %s TEXT NOT NULL, %s TEXT NOT NULL, %s TEXT, %s TEXT)",
-                COMPUTER_TABLE_NAME, COMPUTER_UUID_COLUMN_NAME, COMPUTER_NAME_COLUMN_NAME,
-                ADDRESSES_COLUMN_NAME, MAC_ADDRESS_COLUMN_NAME, SERVER_CERT_COLUMN_NAME));
-
-        // Move all computers from the old DB (if any) to the new one
-        List<ComputerDetails> oldComputers = LegacyDatabaseReader.migrateAllComputers(c);
-        for (ComputerDetails computer : oldComputers) {
-            updateComputer(computer);
-        }
-        oldComputers = LegacyDatabaseReader2.migrateAllComputers(c);
-        for (ComputerDetails computer : oldComputers) {
-            updateComputer(computer);
-        }
-        oldComputers = LegacyDatabaseReader3.migrateAllComputers(c);
-        for (ComputerDetails computer : oldComputers) {
-            updateComputer(computer);
-        }
-    }
-
-    public void deleteComputer(ComputerDetails details) {
-        computerDb.delete(COMPUTER_TABLE_NAME, COMPUTER_UUID_COLUMN_NAME+"=?", new String[]{details.uuid});
+        // MMKV doesn't need explicit close
     }
 
     public static JSONObject tupleToJson(ComputerDetails.AddressTuple tuple) throws JSONException {
@@ -97,139 +64,184 @@ public class ComputerDatabaseManager {
         return json;
     }
 
-    public static ComputerDetails.AddressTuple tupleFromJson(JSONObject json, String name) throws JSONException {
-        if (!json.has(name)) {
+    public static ComputerDetails.AddressTuple tupleFromJson(JSONObject json) throws JSONException {
+        if (json == null) {
             return null;
         }
 
-        JSONObject address = json.getJSONObject(name);
         return new ComputerDetails.AddressTuple(
-                address.getString(AddressFields.ADDRESS), address.getInt(AddressFields.PORT));
+                json.getString(AddressFields.ADDRESS), json.getInt(AddressFields.PORT));
     }
 
-    public boolean updateComputer(ComputerDetails details) {
-        ContentValues values = new ContentValues();
-        values.put(COMPUTER_UUID_COLUMN_NAME, details.uuid);
-        values.put(COMPUTER_NAME_COLUMN_NAME, details.name);
-
+    private String computerToJson(ComputerDetails details) {
         try {
-            JSONObject addresses = new JSONObject();
-            addresses.put(AddressFields.LOCAL, tupleToJson(details.localAddress));
-            addresses.put(AddressFields.REMOTE, tupleToJson(details.remoteAddress));
-            addresses.put(AddressFields.MANUAL, tupleToJson(details.manualAddress));
-            addresses.put(AddressFields.IPv6, tupleToJson(details.ipv6Address));
-            values.put(ADDRESSES_COLUMN_NAME, addresses.toString());
-        } catch (JSONException e) {
-            throw new RuntimeException(e);
-        }
+            JSONObject json = new JSONObject();
+            json.put(ComputerFields.UUID, details.uuid);
+            json.put(ComputerFields.NAME, details.name);
 
-        values.put(MAC_ADDRESS_COLUMN_NAME, details.macAddress);
-        try {
+            if (details.localAddress != null) {
+                json.put(ComputerFields.LOCAL_ADDRESS, tupleToJson(details.localAddress));
+            }
+            if (details.remoteAddress != null) {
+                json.put(ComputerFields.REMOTE_ADDRESS, tupleToJson(details.remoteAddress));
+            }
+            if (details.manualAddress != null) {
+                json.put(ComputerFields.MANUAL_ADDRESS, tupleToJson(details.manualAddress));
+            }
+            if (details.ipv6Address != null) {
+                json.put(ComputerFields.IPV6_ADDRESS, tupleToJson(details.ipv6Address));
+            }
+
+            json.put(ComputerFields.MAC_ADDRESS, details.macAddress);
+
             if (details.serverCert != null) {
-                values.put(SERVER_CERT_COLUMN_NAME, details.serverCert.getEncoded());
+                try {
+                    String certBase64 = Base64.encodeToString(details.serverCert.getEncoded(), Base64.NO_WRAP);
+                    json.put(ComputerFields.SERVER_CERT, certBase64);
+                } catch (CertificateEncodingException e) {
+                    Log.e(TAG, "computerToJson: " + e.getMessage(), e);
+                }
             }
-            else {
-                values.put(SERVER_CERT_COLUMN_NAME, (byte[])null);
-            }
-        } catch (CertificateEncodingException e) {
-            values.put(SERVER_CERT_COLUMN_NAME, (byte[])null);
-            e.printStackTrace();
-        }
-        return -1 != computerDb.insertWithOnConflict(COMPUTER_TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE);
-    }
 
-    private ComputerDetails getComputerFromCursor(Cursor c) {
-        ComputerDetails details = new ComputerDetails();
-
-        details.uuid = c.getString(0);
-        details.name = c.getString(1);
-        try {
-            JSONObject addresses = new JSONObject(c.getString(2));
-            details.localAddress = tupleFromJson(addresses, AddressFields.LOCAL);
-            details.remoteAddress = tupleFromJson(addresses, AddressFields.REMOTE);
-            details.manualAddress = tupleFromJson(addresses, AddressFields.MANUAL);
-            details.ipv6Address = tupleFromJson(addresses, AddressFields.IPv6);
+            return json.toString();
         } catch (JSONException e) {
             throw new RuntimeException(e);
-         }
-
-        // External port is persisted in the remote address field
-        if (details.remoteAddress != null) {
-            details.externalPort = details.remoteAddress.port;
         }
-        else {
-            details.externalPort = NvHTTP.DEFAULT_HTTP_PORT;
-        }
+    }
 
-        details.macAddress = c.getString(3);
+    private ComputerDetails computerFromJson(String jsonStr) {
+        if (jsonStr == null || jsonStr.isEmpty()) {
+            return null;
+        }
 
         try {
-            byte[] derCertData = c.getBlob(4);
+            JSONObject json = new JSONObject(jsonStr);
+            ComputerDetails details = new ComputerDetails();
 
-            if (derCertData != null) {
-                details.serverCert = (X509Certificate) CertificateFactory.getInstance("X.509")
-                        .generateCertificate(new ByteArrayInputStream(derCertData));
+            details.uuid = json.optString(ComputerFields.UUID, null);
+            details.name = json.optString(ComputerFields.NAME, null);
+
+            if (json.has(ComputerFields.LOCAL_ADDRESS)) {
+                details.localAddress = tupleFromJson(json.getJSONObject(ComputerFields.LOCAL_ADDRESS));
             }
-        } catch (CertificateException e) {
-            e.printStackTrace();
+            if (json.has(ComputerFields.REMOTE_ADDRESS)) {
+                details.remoteAddress = tupleFromJson(json.getJSONObject(ComputerFields.REMOTE_ADDRESS));
+            }
+            if (json.has(ComputerFields.MANUAL_ADDRESS)) {
+                details.manualAddress = tupleFromJson(json.getJSONObject(ComputerFields.MANUAL_ADDRESS));
+            }
+            if (json.has(ComputerFields.IPV6_ADDRESS)) {
+                details.ipv6Address = tupleFromJson(json.getJSONObject(ComputerFields.IPV6_ADDRESS));
+            }
+
+            // External port is persisted in the remote address field
+            if (details.remoteAddress != null) {
+                details.externalPort = details.remoteAddress.port;
+            } else {
+                details.externalPort = NvHTTP.DEFAULT_HTTP_PORT;
+            }
+
+            details.macAddress = json.optString(ComputerFields.MAC_ADDRESS, null);
+
+            String certBase64 = json.optString(ComputerFields.SERVER_CERT, null);
+            if (!certBase64.isEmpty()) {
+                try {
+                    byte[] derCertData = Base64.decode(certBase64, Base64.NO_WRAP);
+                    details.serverCert = (X509Certificate) CertificateFactory.getInstance("X.509")
+                            .generateCertificate(new ByteArrayInputStream(derCertData));
+                } catch (CertificateException e) {
+                    Log.e(TAG, "computerFromJson: Failed to decode server certificate - " + e.getMessage(), e);
+                }
+            }
+
+            // This signifies we don't have dynamic state (like pair state)
+            details.state = ComputerDetails.State.UNKNOWN;
+
+            return details;
+        } catch (JSONException e) {
+            Log.e(TAG, "computerFromJson: "+e.getMessage(),e );
+            return null;
+        }
+    }
+
+    private List<String> getComputerUuids() {
+        String uuidsJson = mmkv.decodeString(COMPUTERS_LIST_KEY, "[]");
+        List<String> uuids = new ArrayList<>();
+        try {
+            JSONArray jsonArray = new JSONArray(uuidsJson);
+            for (int i = 0; i < jsonArray.length(); i++) {
+                uuids.add(jsonArray.getString(i));
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "getComputerUuids: " + e.getMessage(), e);
+        }
+        return uuids;
+    }
+
+    private void saveComputerUuids(List<String> uuids) {
+        JSONArray jsonArray = new JSONArray(uuids);
+        mmkv.encode(COMPUTERS_LIST_KEY, jsonArray.toString());
+    }
+
+    public void updateComputer(ComputerDetails details) {
+        if (details.uuid == null) {
+            return;
         }
 
-        // This signifies we don't have dynamic state (like pair state)
-        details.state = ComputerDetails.State.UNKNOWN;
+        // Save computer data
+        String jsonStr = computerToJson(details);
+        mmkv.encode(details.uuid, jsonStr);
 
-        return details;
+        // Update UUID list if not already present
+        List<String> uuids = getComputerUuids();
+        if (!uuids.contains(details.uuid)) {
+            uuids.add(details.uuid);
+            saveComputerUuids(uuids);
+        }
+
+    }
+
+    public void deleteComputer(ComputerDetails details) {
+        if (details.uuid == null) {
+            return;
+        }
+
+        // Remove computer data
+        mmkv.removeValueForKey(details.uuid);
+
+        // Remove from UUID list
+        List<String> uuids = getComputerUuids();
+        uuids.remove(details.uuid);
+        saveComputerUuids(uuids);
     }
 
     public List<ComputerDetails> getAllComputers() {
-        try (final Cursor c = computerDb.rawQuery("SELECT * FROM "+COMPUTER_TABLE_NAME, null)) {
-            LinkedList<ComputerDetails> computerList = new LinkedList<>();
-            while (c.moveToNext()) {
-                computerList.add(getComputerFromCursor(c));
+        List<ComputerDetails> computers = new ArrayList<>();
+        List<String> uuids = getComputerUuids();
+
+        for (String uuid : uuids) {
+            String jsonStr = mmkv.decodeString(uuid, null);
+            ComputerDetails details = computerFromJson(jsonStr);
+            if (details != null && details.uuid != null) {
+                computers.add(details);
             }
-            return computerList;
         }
+
+        return computers;
     }
 
-    /**
-     * Get a computer by name
-     * NOTE: It is perfectly valid for multiple computers to have the same name,
-     * this function will only return the first one it finds.
-     * Consider using getComputerByUUID instead.
-     * @param name The name of the computer
-     * @see ComputerDatabaseManager#getComputerByUUID(String) for alternative.
-     * @return The computer details, or null if no computer with that name exists
-     */
     public ComputerDetails getComputerByName(String name) {
-        try (final Cursor c = computerDb.query(
-                COMPUTER_TABLE_NAME, null, COMPUTER_NAME_COLUMN_NAME+"=?",
-                new String[]{ name }, null, null, null)
-        ) {
-            if (!c.moveToFirst()) {
-                // No matching computer
-                return null;
+        List<ComputerDetails> computers = getAllComputers();
+        for (ComputerDetails computer : computers) {
+            if (name.equals(computer.name)) {
+                return computer;
             }
-
-            return getComputerFromCursor(c);
         }
+        return null;
     }
 
-    /**
-     * Get a computer by UUID
-     * @param uuid The UUID of the computer
-     * @see ComputerDatabaseManager#getComputerByName(String) for alternative.
-     * @return The computer details, or null if no computer with that UUID exists
-     */
     public ComputerDetails getComputerByUUID(String uuid) {
-        try (final Cursor c = computerDb.query(
-                COMPUTER_TABLE_NAME, null, COMPUTER_UUID_COLUMN_NAME+"=?",
-                new String[]{ uuid }, null, null, null)
-        ) {
-            if (!c.moveToFirst()) {
-                // No matching computer
-                return null;
-            }
-
-            return getComputerFromCursor(c);
-        }
+        String jsonStr = mmkv.decodeString(uuid, null);
+        return computerFromJson(jsonStr);
     }
 }

@@ -31,6 +31,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
@@ -39,13 +40,14 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 public class AddComputerManually extends Activity {
+    private static final String TAG = "AddComputerManually";
     private TextView hostText;
     private ComputerManagerService.ComputerManagerBinder managerBinder;
     private final LinkedBlockingQueue<String> computersToAdd = new LinkedBlockingQueue<>();
     private Thread addThread;
     private final ServiceConnection serviceConnection = new ServiceConnection() {
         public void onServiceConnected(ComponentName className, final IBinder binder) {
-            managerBinder = ((ComputerManagerService.ComputerManagerBinder)binder);
+            managerBinder = ((ComputerManagerService.ComputerManagerBinder) binder);
             startAddThread();
         }
 
@@ -106,7 +108,8 @@ public class AddComputerManually extends Activity {
             if (uri.getHost() != null && !uri.getHost().isEmpty()) {
                 return uri;
             }
-        } catch (URISyntaxException ignored) {}
+        } catch (URISyntaxException ignored) {
+        }
 
         try {
             // Attempt to escape the input as an IPv6 literal.
@@ -115,7 +118,8 @@ public class AddComputerManually extends Activity {
             if (uri.getHost() != null && !uri.getHost().isEmpty()) {
                 return uri;
             }
-        } catch (URISyntaxException ignored) {}
+        } catch (URISyntaxException ignored) {
+        }
 
         return null;
     }
@@ -127,7 +131,7 @@ public class AddComputerManually extends Activity {
         int portTestResult;
 
         SpinnerDialog dialog = SpinnerDialog.displayDialog(this, getResources().getString(R.string.title_add_pc),
-            getResources().getString(R.string.msg_add_pc), false);
+                getResources().getString(R.string.msg_add_pc), false);
 
         try {
             ComputerDetails details = new ComputerDetails();
@@ -145,7 +149,7 @@ public class AddComputerManually extends Activity {
 
                 details.manualAddress = new ComputerDetails.AddressTuple(host, port);
                 success = managerBinder.addComputerBlocking(details);
-                if (!success){
+                if (!success) {
                     wrongSiteLocal = isWrongSubnetSiteLocalAddress(host);
                 }
             } else {
@@ -160,7 +164,7 @@ public class AddComputerManually extends Activity {
         } catch (IllegalArgumentException e) {
             // This can be thrown from OkHttp if the host fails to canonicalize to a valid name.
             // https://github.com/square/okhttp/blob/okhttp_27/okhttp/src/main/java/com/squareup/okhttp/HttpUrl.java#L705
-            e.printStackTrace();
+            Log.e(TAG, "doAddPc: " + e.getMessage(), e);
             success = false;
             invalidInput = true;
         }
@@ -179,30 +183,26 @@ public class AddComputerManually extends Activity {
 
         if (invalidInput) {
             Dialog.displayDialog(this, getResources().getString(R.string.conn_error_title), getResources().getString(R.string.addpc_unknown_host), false);
-        }
-        else if (wrongSiteLocal) {
+        } else if (wrongSiteLocal) {
             Dialog.displayDialog(this, getResources().getString(R.string.conn_error_title), getResources().getString(R.string.addpc_wrong_sitelocal), false);
-        }
-        else if (!success) {
+        } else if (!success) {
             String dialogText;
-            if (portTestResult != MoonBridge.ML_TEST_RESULT_INCONCLUSIVE && portTestResult != 0)  {
+            if (portTestResult != MoonBridge.ML_TEST_RESULT_INCONCLUSIVE && portTestResult != 0) {
                 dialogText = getResources().getString(R.string.nettest_text_blocked);
-            }
-            else {
+            } else {
                 dialogText = getResources().getString(R.string.addpc_fail);
             }
             Dialog.displayDialog(this, getResources().getString(R.string.conn_error_title), dialogText, false);
-        }
-        else {
+        } else {
             AddComputerManually.this.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                Toast.makeText(AddComputerManually.this, getResources().getString(R.string.addpc_success), Toast.LENGTH_LONG).show();
+                    Toast.makeText(AddComputerManually.this, getResources().getString(R.string.addpc_success), Toast.LENGTH_LONG).show();
 
-                if (!isFinishing()) {
-                    // Close the activity
-                    AddComputerManually.this.finish();
-                }
+                    if (!isFinishing()) {
+                        // Close the activity
+                        AddComputerManually.this.finish();
+                    }
                 }
             });
         }
@@ -234,7 +234,7 @@ public class AddComputerManually extends Activity {
             try {
                 addThread.join();
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                Log.e(TAG, "joinAddThread: " + e.getMessage(), e);
 
                 // InterruptedException clears the thread's interrupt status. Since we can't
                 // handle that here, we will re-interrupt the thread to set the interrupt
@@ -273,27 +273,24 @@ public class AddComputerManually extends Activity {
         setContentView(R.layout.activity_add_computer_manually);
 
         UiHelper.notifyNewRootView(this);
+        UiHelper.applyStatusBarPadding(findViewById(android.R.id.content));
 
         this.hostText = findViewById(R.id.hostTextView);
         hostText.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        hostText.setOnEditorActionListener(new TextView.OnEditorActionListener() {
-            @Override
-            public boolean onEditorAction(TextView textView, int actionId, KeyEvent keyEvent) {
-                if (actionId == EditorInfo.IME_ACTION_DONE ||
-                        (keyEvent != null &&
-                                keyEvent.getAction() == KeyEvent.ACTION_DOWN &&
-                                keyEvent.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
-                    return handleDoneEvent();
-                }
-                else if (actionId == EditorInfo.IME_ACTION_PREVIOUS) {
-                    // This is how the Fire TV dismisses the keyboard
-                    InputMethodManager imm = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
-                    imm.hideSoftInputFromWindow(hostText.getWindowToken(), 0);
-                    return false;
-                }
-
+        hostText.setOnEditorActionListener((textView, actionId, keyEvent) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE ||
+                    (keyEvent != null &&
+                            keyEvent.getAction() == KeyEvent.ACTION_DOWN &&
+                            keyEvent.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                return handleDoneEvent();
+            } else if (actionId == EditorInfo.IME_ACTION_PREVIOUS) {
+                // This is how the Fire TV dismisses the keyboard
+                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                imm.hideSoftInputFromWindow(hostText.getWindowToken(), 0);
                 return false;
             }
+
+            return false;
         });
 
         findViewById(R.id.addPcButton).setOnClickListener(new View.OnClickListener() {
@@ -305,14 +302,14 @@ public class AddComputerManually extends Activity {
 
         // Bind to the ComputerManager service
         bindService(new Intent(AddComputerManually.this,
-                    ComputerManagerService.class), serviceConnection, Service.BIND_AUTO_CREATE);
+                ComputerManagerService.class), serviceConnection, Service.BIND_AUTO_CREATE);
     }
 
     // Returns true if the event should be eaten
     private boolean handleDoneEvent() {
         String hostAddress = hostText.getText().toString().trim();
 
-        if (hostAddress.length() == 0) {
+        if (hostAddress.isEmpty()) {
             Toast.makeText(AddComputerManually.this, getResources().getString(R.string.addpc_enter_ip), Toast.LENGTH_LONG).show();
             return true;
         }

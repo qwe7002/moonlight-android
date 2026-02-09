@@ -11,7 +11,6 @@ import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Insets;
-import android.os.Build;
 import android.os.LocaleList;
 import android.view.View;
 import android.view.WindowInsets;
@@ -22,8 +21,6 @@ import com.limelight.R;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.preferences.PreferenceConfiguration;
 
-import java.util.Locale;
-
 public class UiHelper {
 
     private static final int TV_VERTICAL_PADDING_DP = 15;
@@ -31,6 +28,9 @@ public class UiHelper {
 
     private static void setGameModeStatus(Context context, boolean streaming, boolean interruptible) {
         GameManager gameManager = context.getSystemService(GameManager.class);
+        if (gameManager == null) {
+            return;
+        }
 
         if (streaming) {
             gameManager.setGameState(new GameState(false, interruptible ? GameState.MODE_GAMEPLAY_INTERRUPTIBLE : GameState.MODE_GAMEPLAY_UNINTERRUPTIBLE));
@@ -64,43 +64,50 @@ public class UiHelper {
     {
         String locale = PreferenceConfiguration.readPreferences(activity).language;
         if (!locale.equals(PreferenceConfiguration.DEFAULT_LANGUAGE)) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // On Android 13, migrate this non-default language setting into the OS native API
-                LocaleManager localeManager = activity.getSystemService(LocaleManager.class);
-                localeManager.setApplicationLocales(LocaleList.forLanguageTags(locale));
-                PreferenceConfiguration.completeLanguagePreferenceMigration(activity);
-            }
-            else {
-                Configuration config = new Configuration(activity.getResources().getConfiguration());
-
-                // Some locales include both language and country which must be separated
-                // before calling the Locale constructor.
-                if (locale.contains("-"))
-                {
-                    config.locale = new Locale(locale.substring(0, locale.indexOf('-')),
-                            locale.substring(locale.indexOf('-') + 1));
-                }
-                else
-                {
-                    config.locale = new Locale(locale);
-                }
-
-                activity.getResources().updateConfiguration(config, activity.getResources().getDisplayMetrics());
-            }
+            // On Android 13, migrate this non-default language setting into the OS native API
+            LocaleManager localeManager = activity.getSystemService(LocaleManager.class);
+            localeManager.setApplicationLocales(LocaleList.forLanguageTags(locale));
+            PreferenceConfiguration.completeLanguagePreferenceMigration(activity);
         }
     }
 
     public static void applyStatusBarPadding(View view) {
-        // This applies the padding that we omitted in notifyNewRootView()
+        // This applies the padding for system bars and display cutout insets to this specific view.
+        // We handle both system bars and display cutout to properly support landscape mode with notches.
+        // We consume the insets to prevent double-padding when used with notifyNewRootView().
         view.setOnApplyWindowInsetsListener((v, windowInsets) -> {
             Insets systemBarsInsets = windowInsets.getInsets(WindowInsets.Type.systemBars());
-            v.setPadding(v.getPaddingLeft(),
-                    v.getPaddingTop(),
-                    v.getPaddingRight(),
-                    systemBarsInsets.bottom);
-            return windowInsets;
+            Insets displayCutoutInsets = windowInsets.getInsets(WindowInsets.Type.displayCutout());
+
+            // Use the maximum of system bars and display cutout insets for each edge
+            // This ensures proper padding in both portrait and landscape modes with notches
+            int left = Math.max(systemBarsInsets.left, displayCutoutInsets.left);
+            int top = Math.max(systemBarsInsets.top, displayCutoutInsets.top);
+            int right = Math.max(systemBarsInsets.right, displayCutoutInsets.right);
+            int bottom = Math.max(systemBarsInsets.bottom, displayCutoutInsets.bottom);
+
+            v.setPadding(left, top, right, bottom);
+            // Consume the insets so they don't propagate further
+            return WindowInsets.CONSUMED;
         });
-        view.requestApplyInsets();
+
+        // Request insets immediately if the view is already attached,
+        // otherwise wait for the view to be attached
+        if (view.isAttachedToWindow()) {
+            view.requestApplyInsets();
+        } else {
+            view.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+                @Override
+                public void onViewAttachedToWindow(View v) {
+                    v.requestApplyInsets();
+                    v.removeOnAttachStateChangeListener(this);
+                }
+
+                @Override
+                public void onViewDetachedFromWindow(View v) {
+                }
+            });
+        }
     }
 
     public static void notifyNewRootView(final Activity activity)
@@ -130,16 +137,8 @@ public class UiHelper {
         }
         else {
             // Handle Edge-to-Edge mode for non-TV devices
-            // On SDK 35+, Edge-to-Edge is enforced. We need to use system bars insets
-            // to properly pad the content so it's not obscured by system UI.
-            activity.findViewById(android.R.id.content).setOnApplyWindowInsetsListener((view, windowInsets) -> {
-                Insets systemBarsInsets = windowInsets.getInsets(WindowInsets.Type.systemBars());
-                view.setPadding(systemBarsInsets.left,
-                        systemBarsInsets.top,
-                        systemBarsInsets.right,
-                        systemBarsInsets.bottom);
-                return windowInsets;
-            });
+            // On SDK 35+, Edge-to-Edge is enforced. Each view that needs padding
+            // should call applyStatusBarPadding() explicitly to avoid double-padding.
 
             // Use the WindowInsetsController API
             WindowInsetsController controller = activity.getWindow().getInsetsController();
