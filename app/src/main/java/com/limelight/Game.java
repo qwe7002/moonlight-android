@@ -93,6 +93,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Only 2 touches are supported
     private final TouchContext[] touchContextMap = new TouchContext[2];
     private long threeFingerDownTime = 0;
+    private long fourFingerDownTime = 0;
 
     private static final int REFERENCE_HORIZ_RES = 1280;
     private static final int REFERENCE_VERT_RES = 720;
@@ -104,6 +105,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private static final int STYLUS_UP_DEAD_ZONE_RADIUS = 50;
 
     private static final int THREE_FINGER_TAP_THRESHOLD = 300;
+    private static final int FOUR_FINGER_TAP_THRESHOLD = 300;
 
     private ControllerHandler controllerHandler;
     private KeyboardTranslator keyboardTranslator;
@@ -142,6 +144,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private TextView notificationOverlayView;
     private int requestedNotificationOverlayVisibility = View.GONE;
     private TextView performanceOverlayView;
+
+    // Keyboard input bar views
+    private View keyboardInputBar;
+    private android.widget.EditText keyboardInputText;
 
     private MediaCodecDecoderRenderer decoderRenderer;
     private boolean reportedCrash;
@@ -260,6 +266,18 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         notificationOverlayView = findViewById(R.id.notificationOverlay);
 
         performanceOverlayView = findViewById(R.id.performanceOverlay);
+
+        // Initialize keyboard input bar
+        keyboardInputBar = findViewById(R.id.keyboardInputBar);
+        keyboardInputText = findViewById(R.id.keyboardInputText);
+        findViewById(R.id.keyboardInputSend).setOnClickListener(v -> {
+            String text = keyboardInputText.getText().toString();
+            if (!text.isEmpty()) {
+                sendTextAsKeyEvents(text);
+            }
+            hideKeyboardInputBar();
+        });
+        findViewById(R.id.keyboardInputCancel).setOnClickListener(v -> hideKeyboardInputBar());
 
         inputCaptureProvider = InputCaptureManager.getInputCaptureProvider(this);
 
@@ -1368,6 +1386,49 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         inputManager.toggleSoftInput(0, 0);
     }
 
+    private void showKeyboardWithInput() {
+        LimeLog.info("Showing keyboard input bar");
+        runOnUiThread(() -> {
+            keyboardInputText.setText("");
+            keyboardInputBar.setVisibility(View.VISIBLE);
+            keyboardInputText.requestFocus();
+            keyboardInputText.postDelayed(() -> {
+                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                imm.showSoftInput(keyboardInputText, InputMethodManager.SHOW_IMPLICIT);
+            }, 100);
+        });
+    }
+
+    private void hideKeyboardInputBar() {
+        runOnUiThread(() -> {
+            keyboardInputBar.setVisibility(View.GONE);
+            keyboardInputText.setText("");
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(keyboardInputText.getWindowToken(), 0);
+            // Restore focus to the stream view
+            streamView.requestFocus();
+        });
+    }
+
+    private void sendTextAsKeyEvents(String text) {
+        android.view.KeyCharacterMap kcm = android.view.KeyCharacterMap.load(android.view.KeyCharacterMap.VIRTUAL_KEYBOARD);
+        android.view.KeyEvent[] events = kcm.getEvents(text.toCharArray());
+        if (events != null) {
+            for (android.view.KeyEvent event : events) {
+                // Translate Android keycode to GFE keycode
+                short translatedKey = keyboardTranslator.translate(event.getKeyCode(), -1);
+                if (translatedKey != 0) {
+                    byte modifiers = getModifierState(event);
+                    if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                        conn.sendKeyboardInput(translatedKey, KeyboardPacket.KEY_DOWN, modifiers, (byte) 0);
+                    } else if (event.getAction() == android.view.KeyEvent.ACTION_UP) {
+                        conn.sendKeyboardInput(translatedKey, KeyboardPacket.KEY_UP, modifiers, (byte) 0);
+                    }
+                }
+            }
+        }
+    }
+
     private byte getLiTouchTypeFromEvent(MotionEvent event) {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
@@ -1896,6 +1957,20 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     return true;
                 }
 
+                // Special handling for 4 finger gesture
+                if (event.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN &&
+                        event.getPointerCount() == 4) {
+                    // Four fingers down
+                    fourFingerDownTime = event.getEventTime();
+
+                    // Cancel all touches to avoid erroneous events
+                    for (TouchContext aTouchContext : touchContextMap) {
+                        aTouchContext.cancelTouch();
+                    }
+
+                    return true;
+                }
+
                 // TODO: Re-enable native touch when have a better solution for handling
                 // cancelled touches from Android gestures and 3 finger taps to activate
                 // the software keyboard.
@@ -1921,9 +1996,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     break;
                 case MotionEvent.ACTION_POINTER_UP:
                 case MotionEvent.ACTION_UP:
-                    if (event.getPointerCount() == 1 &&
-                            (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || (event.getFlags() & MotionEvent.FLAG_CANCELED) == 0)) {
+                    if (event.getPointerCount() == 1 && (event.getFlags() & MotionEvent.FLAG_CANCELED) == 0) {
                         // All fingers up
+                        // Check for 4 finger tap first (keyboard with input)
+                        if (event.getEventTime() - fourFingerDownTime < FOUR_FINGER_TAP_THRESHOLD) {
+                            // This is a 4 finger tap to bring up keyboard with input dialog
+                            showKeyboardWithInput();
+                            return true;
+                        }
+                        // Check for 3 finger tap (toggle keyboard)
                         if (event.getEventTime() - threeFingerDownTime < THREE_FINGER_TAP_THRESHOLD) {
                             // This is a 3 finger tap to bring up the keyboard
                             toggleKeyboard();
@@ -1931,7 +2012,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         }
                     }
 
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && (event.getFlags() & MotionEvent.FLAG_CANCELED) != 0) {
+                    if ((event.getFlags() & MotionEvent.FLAG_CANCELED) != 0) {
                         context.cancelTouch();
                     }
                     else {
@@ -2406,18 +2487,12 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
 
         // Tell the OS about our frame rate to allow it to adapt the display refresh rate appropriately
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // We want to change frame rate even if it's not seamless, since prepareDisplayForRendering()
-            // will not set the display mode on S+ if it only differs by the refresh rate. It depends
-            // on us to trigger the frame rate switch here.
-            holder.getSurface().setFrameRate(desiredFrameRate,
-                    Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
-                    Surface.CHANGE_FRAME_RATE_ALWAYS);
-        }
-        else {
-            holder.getSurface().setFrameRate(desiredFrameRate,
-                    Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
-        }
+        // We want to change frame rate even if it's not seamless, since prepareDisplayForRendering()
+        // will not set the display mode on S+ if it only differs by the refresh rate. It depends
+        // on us to trigger the frame rate switch here.
+        holder.getSurface().setFrameRate(desiredFrameRate,
+                Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                Surface.CHANGE_FRAME_RATE_ALWAYS);
     }
 
     @Override

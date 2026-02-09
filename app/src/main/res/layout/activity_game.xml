@@ -50,4 +50,51 @@
         android:preferKeepClear="true"
         android:visibility="gone" />
 
+    <!-- Bottom keyboard input bar -->
+    <LinearLayout
+        android:id="@+id/keyboardInputBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        android:background="#E0303030"
+        android:visibility="gone"
+        android:elevation="8dp">
+
+        <EditText
+            android:id="@+id/keyboardInputText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="@string/keyboard_input_hint"
+            android:inputType="text|textNoSuggestions"
+            android:imeOptions="flagNoFullscreen|flagNoExtractUi"
+            android:singleLine="true"
+            android:maxLines="1"
+            android:textColor="@android:color/black"
+            android:textColorHint="#80000000"
+            android:background="@android:drawable/editbox_background"
+            android:padding="12dp" />
+
+        <Button
+            android:id="@+id/keyboardInputSend"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_marginLeft="8dp"
+            android:text="@string/keyboard_input_send"
+            android:minWidth="80dp" />
+
+        <Button
+            android:id="@+id/keyboardInputCancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginLeft="4dp"
+            android:text="@android:string/cancel"
+            android:minWidth="80dp" />
+
+    </LinearLayout>
+
 </merge>
