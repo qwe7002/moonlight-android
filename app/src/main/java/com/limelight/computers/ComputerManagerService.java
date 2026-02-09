@@ -578,6 +578,15 @@ public class ComputerManagerService extends Service {
             return null;
         } catch (IOException e) {
             return null;
+        } catch (InterruptedException e) {
+            // Thread was interrupted, restore interrupt status and return null
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (Exception e) {
+            // Catch any other unexpected exceptions to prevent crashes
+            LimeLog.warning("Unexpected exception in tryPollIp: " + e.getMessage());
+            e.printStackTrace();
+            return null;
         }
     }
 

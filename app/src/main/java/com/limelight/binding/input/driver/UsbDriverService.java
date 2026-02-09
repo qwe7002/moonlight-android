@@ -137,10 +137,13 @@ public class UsbDriverService extends Service implements UsbDriverListener {
     }
 
     private void handleUsbDeviceState(UsbDevice device) {
+        LimeLog.info("handleUsbDeviceState called for: " + device.getDeviceName());
         // Are we able to operate it?
         if (shouldClaimDevice(device, prefConfig.bindAllUsb)) {
+            LimeLog.info("Device can be claimed, checking permission...");
             // Do we have permission yet?
             if (!usbManager.hasPermission(device)) {
+                LimeLog.info("No permission, requesting...");
                 // Let's ask for permission
                 try {
                     // Tell the state listener that we're about to display a permission dialog
@@ -166,7 +169,9 @@ public class UsbDriverService extends Service implements UsbDriverListener {
                     i.setPackage(getPackageName());
 
                     usbManager.requestPermission(device, PendingIntent.getBroadcast(UsbDriverService.this, 0, i, intentFlags));
+                    LimeLog.info("Permission request sent for device: " + device.getDeviceName());
                 } catch (SecurityException e) {
+                    LimeLog.warning("SecurityException when requesting USB permission: " + e.getMessage());
                     Toast.makeText(this, this.getText(R.string.error_usb_prohibited), Toast.LENGTH_LONG).show();
                     if (stateListener != null) {
                         stateListener.onUsbPermissionPromptCompleted();
@@ -174,6 +179,8 @@ public class UsbDriverService extends Service implements UsbDriverListener {
                 }
                 return;
             }
+
+            LimeLog.info("Permission already granted for device: " + device.getDeviceName());
 
             // Open the device
             UsbDeviceConnection connection = usbManager.openDevice(device);
@@ -302,7 +309,18 @@ public class UsbDriverService extends Service implements UsbDriverListener {
 
         // Enumerate existing devices
         for (UsbDevice dev : usbManager.getDeviceList().values()) {
-            if (shouldClaimDevice(dev, prefConfig.bindAllUsb)) {
+            LimeLog.info("Found USB device: " + dev.getDeviceName() +
+                    " VID: 0x" + Integer.toHexString(dev.getVendorId()) +
+                    " PID: 0x" + Integer.toHexString(dev.getProductId()) +
+                    " Interfaces: " + dev.getInterfaceCount());
+            if (dev.getInterfaceCount() > 0) {
+                LimeLog.info("  Interface 0 - Class: " + dev.getInterface(0).getInterfaceClass() +
+                        " Subclass: " + dev.getInterface(0).getInterfaceSubclass() +
+                        " Protocol: " + dev.getInterface(0).getInterfaceProtocol());
+            }
+            boolean shouldClaim = shouldClaimDevice(dev, prefConfig.bindAllUsb);
+            LimeLog.info("  shouldClaimDevice: " + shouldClaim + " (bindAllUsb: " + prefConfig.bindAllUsb + ")");
+            if (shouldClaim) {
                 // Start the process of claiming this device
                 handleUsbDeviceState(dev);
             }

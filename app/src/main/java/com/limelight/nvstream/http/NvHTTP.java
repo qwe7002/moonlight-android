@@ -6,6 +6,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.InterruptedIOException;
 import java.io.Reader;
 import java.io.StringReader;
 import java.net.Inet4Address;
@@ -429,7 +430,21 @@ public class NvHTTP {
     private ResponseBody openHttpConnection(OkHttpClient client, HttpUrl baseUrl, String path, String query) throws IOException {
         HttpUrl completeUrl = getCompleteUrl(baseUrl, path, query);
         Request request = new Request.Builder().url(completeUrl).get().build();
-        Response response = performAndroidTlsHack(client).newCall(request).execute();
+        Response response;
+        try {
+            response = performAndroidTlsHack(client).newCall(request).execute();
+        } catch (IOException e) {
+            throw e;
+        } catch (Throwable t) {
+            // Handle InterruptedException from OkHttp's internal connection handling
+            // OkHttp may throw InterruptedException directly in some edge cases
+            if (t instanceof InterruptedException ||
+                (t.getCause() != null && t.getCause() instanceof InterruptedException)) {
+                Thread.currentThread().interrupt();
+                throw new InterruptedIOException("HTTP request interrupted");
+            }
+            throw new IOException("Unexpected error during HTTP request", t);
+        }
 
         ResponseBody body = response.body();
         
