@@ -577,10 +577,10 @@ public class ComputerManagerService extends Service {
             e.printStackTrace();
             return null;
         } catch (IOException e) {
-            return null;
-        } catch (InterruptedException e) {
-            // Thread was interrupted, restore interrupt status and return null
-            Thread.currentThread().interrupt();
+            // Check if this was caused by thread interruption
+            if (Thread.currentThread().isInterrupted()) {
+                return null;
+            }
             return null;
         } catch (Exception e) {
             // Catch any other unexpected exceptions to prevent crashes
