@@ -15,7 +15,7 @@ public class PreferenceConfiguration {
         FORCE_AV1,
         FORCE_HEVC,
         FORCE_H264,
-    };
+    }
 
     public enum AnalogStickForScrolling {
         NONE,
@@ -49,6 +49,7 @@ public class PreferenceConfiguration {
     private static final String ENABLE_HDR_PREF_STRING = "checkbox_enable_hdr";
     private static final String ENABLE_PIP_PREF_STRING = "checkbox_enable_pip";
     private static final String ENABLE_PERF_OVERLAY_STRING = "checkbox_enable_perf_overlay";
+    private static final String ENABLE_STATS_NOTIFICATION_STRING = "checkbox_enable_stats_notification";
     private static final String BIND_ALL_USB_STRING = "checkbox_usb_bind_all";
     private static final String MOUSE_EMULATION_STRING = "checkbox_mouse_emulation";
     private static final String ANALOG_SCROLLING_PREF_STRING = "analog_scrolling";
@@ -89,6 +90,7 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_ENABLE_HDR = false;
     private static final boolean DEFAULT_ENABLE_PIP = false;
     private static final boolean DEFAULT_ENABLE_PERF_OVERLAY = false;
+    private static final boolean DEFAULT_ENABLE_STATS_NOTIFICATION = false;
     private static final boolean DEFAULT_BIND_ALL_USB = false;
     private static final boolean DEFAULT_MOUSE_EMULATION = true;
     private static final String DEFAULT_ANALOG_STICK_FOR_SCROLLING = "right";
@@ -138,6 +140,7 @@ public class PreferenceConfiguration {
     public boolean enableHdr;
     public boolean enablePip;
     public boolean enablePerfOverlay;
+    public boolean enableStatsNotification;
     public boolean enableLatencyToast;
     public boolean bindAllUsb;
     public boolean mouseEmulation;
@@ -176,11 +179,7 @@ public class PreferenceConfiguration {
         else if (width == 2560 && height == 1440) {
             return false;
         }
-        else if (width == 3840 && height == 2160) {
-            return false;
-        }
-
-        return true;
+        else return width != 3840 || height != 2160;
     }
 
     // If we have a screen that has semi-square dimensions, we may want to change our behavior
@@ -196,14 +195,8 @@ public class PreferenceConfiguration {
     public static boolean isSquarishScreen(Display display) {
         int width, height;
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            width = display.getMode().getPhysicalWidth();
-            height = display.getMode().getPhysicalHeight();
-        }
-        else {
-            width = display.getWidth();
-            height = display.getHeight();
-        }
+        width = display.getMode().getPhysicalWidth();
+        height = display.getMode().getPhysicalHeight();
 
         return isSquarishScreen(width, height);
     }
@@ -243,19 +236,14 @@ public class PreferenceConfiguration {
 
     private static String getResolutionString(int width, int height) {
         switch (height) {
-            case 360:
-                return RES_360P;
-            case 480:
-                return RES_480P;
-            default:
-            case 720:
-                return RES_720P;
             case 1080:
                 return RES_1080P;
             case 1440:
                 return RES_1440P;
             case 2160:
                 return RES_4K;
+            default:
+                return RES_720P;
         }
     }
 
@@ -331,10 +319,8 @@ public class PreferenceConfiguration {
             }
 
             // API 21 uses LEANBACK instead of TELEVISION
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                if (manager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
-                    return false;
-                }
+            if (manager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
+                return false;
             }
         }
 
@@ -353,21 +339,18 @@ public class PreferenceConfiguration {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
 
         String str = prefs.getString(VIDEO_FORMAT_PREF_STRING, DEFAULT_VIDEO_FORMAT);
-        if (str.equals("auto")) {
-            return FormatOption.AUTO;
-        }
-        else if (str.equals("forceav1")) {
-            return FormatOption.FORCE_AV1;
-        }
-        else if (str.equals("forceh265")) {
-            return FormatOption.FORCE_HEVC;
-        }
-        else if (str.equals("neverh265")) {
-            return FormatOption.FORCE_H264;
-        }
-        else {
-            // Should never get here
-            return FormatOption.AUTO;
+        switch (str) {
+            case "auto":
+                return FormatOption.AUTO;
+            case "forceav1":
+                return FormatOption.FORCE_AV1;
+            case "forceh265":
+                return FormatOption.FORCE_HEVC;
+            case "neverh265":
+                return FormatOption.FORCE_H264;
+            default:
+                // Should never get here
+                return FormatOption.AUTO;
         }
     }
 
@@ -384,21 +367,18 @@ public class PreferenceConfiguration {
         }
 
         String str = prefs.getString(FRAME_PACING_PREF_STRING, DEFAULT_FRAME_PACING);
-        if (str.equals("latency")) {
-            return FRAME_PACING_MIN_LATENCY;
-        }
-        else if (str.equals("balanced")) {
-            return FRAME_PACING_BALANCED;
-        }
-        else if (str.equals("cap-fps")) {
-            return FRAME_PACING_CAP_FPS;
-        }
-        else if (str.equals("smoothness")) {
-            return FRAME_PACING_MAX_SMOOTHNESS;
-        }
-        else {
-            // Should never get here
-            return FRAME_PACING_MIN_LATENCY;
+        switch (str) {
+            case "latency":
+                return FRAME_PACING_MIN_LATENCY;
+            case "balanced":
+                return FRAME_PACING_BALANCED;
+            case "cap-fps":
+                return FRAME_PACING_CAP_FPS;
+            case "smoothness":
+                return FRAME_PACING_MAX_SMOOTHNESS;
+            default:
+                // Should never get here
+                return FRAME_PACING_MIN_LATENCY;
         }
     }
 
@@ -467,51 +447,53 @@ public class PreferenceConfiguration {
 
         String str = prefs.getString(LEGACY_RES_FPS_PREF_STRING, null);
         if (str != null) {
-            if (str.equals("360p30")) {
-                config.width = 640;
-                config.height = 360;
-                config.fps = 30;
-            }
-            else if (str.equals("360p60")) {
-                config.width = 640;
-                config.height = 360;
-                config.fps = 60;
-            }
-            else if (str.equals("720p30")) {
-                config.width = 1280;
-                config.height = 720;
-                config.fps = 30;
-            }
-            else if (str.equals("720p60")) {
-                config.width = 1280;
-                config.height = 720;
-                config.fps = 60;
-            }
-            else if (str.equals("1080p30")) {
-                config.width = 1920;
-                config.height = 1080;
-                config.fps = 30;
-            }
-            else if (str.equals("1080p60")) {
-                config.width = 1920;
-                config.height = 1080;
-                config.fps = 60;
-            }
-            else if (str.equals("4K30")) {
-                config.width = 3840;
-                config.height = 2160;
-                config.fps = 30;
-            }
-            else if (str.equals("4K60")) {
-                config.width = 3840;
-                config.height = 2160;
-                config.fps = 60;
-            }
-            else {
-                // Should never get here
-                config.width = 1280;
-                config.height = 720;
-                config.fps = 60;
+            switch (str) {
+                case "360p30":
+                    config.width = 640;
+                    config.height = 360;
+                    config.fps = 30;
+                    break;
+                case "360p60":
+                    config.width = 640;
+                    config.height = 360;
+                    config.fps = 60;
+                    break;
+                case "720p30":
+                    config.width = 1280;
+                    config.height = 720;
+                    config.fps = 30;
+                    break;
+                case "720p60":
+                    config.width = 1280;
+                    config.height = 720;
+                    config.fps = 60;
+                    break;
+                case "1080p30":
+                    config.width = 1920;
+                    config.height = 1080;
+                    config.fps = 30;
+                    break;
+                case "1080p60":
+                    config.width = 1920;
+                    config.height = 1080;
+                    config.fps = 60;
+                    break;
+                case "4K30":
+                    config.width = 3840;
+                    config.height = 2160;
+                    config.fps = 30;
+                    break;
+                case "4K60":
+                    config.width = 3840;
+                    config.height = 2160;
+                    config.fps = 60;
+                    break;
+                default:
+                    // Should never get here
+                    config.width = 1280;
+                    config.height = 720;
+                    config.fps = 60;
+                    break;
             }
 
             prefs.edit()
@@ -541,14 +523,7 @@ public class PreferenceConfiguration {
             prefs.edit().putBoolean(SMALL_ICONS_PREF_STRING, getDefaultSmallMode(context)).apply();
         }
 
-        if (!prefs.contains(GAMEPAD_MOTION_SENSORS_PREF_STRING) && Build.VERSION.SDK_INT == Build.VERSION_CODES.S) {
-            // Android 12 has a nasty bug that causes crashes when the app touches the InputDevice's
-            // associated InputDeviceSensorManager (just calling getSensorManager() is enough).
-            // As a workaround, we will override the default value for the gamepad motion sensor
-            // option to disabled on Android 12 to reduce the impact of this bug.
-            // https://cs.android.com/android/_/android/platform/frameworks/base/+/8970010a5e9f3dc5c069f56b4147552accfcbbeb
-            prefs.edit().putBoolean(GAMEPAD_MOTION_SENSORS_PREF_STRING, false).apply();
-        }
+        prefs.contains(GAMEPAD_MOTION_SENSORS_PREF_STRING);
 
         // This must happen after the preferences migration to ensure the preferences are populated
         config.bitrate = prefs.getInt(BITRATE_PREF_STRING, prefs.getInt(BITRATE_PREF_OLD_STRING, 0) * 1000);
@@ -592,6 +567,7 @@ public class PreferenceConfiguration {
         config.enableHdr = prefs.getBoolean(ENABLE_HDR_PREF_STRING, DEFAULT_ENABLE_HDR) && !isShieldAtvFirmwareWithBrokenHdr();
         config.enablePip = prefs.getBoolean(ENABLE_PIP_PREF_STRING, DEFAULT_ENABLE_PIP);
         config.enablePerfOverlay = prefs.getBoolean(ENABLE_PERF_OVERLAY_STRING, DEFAULT_ENABLE_PERF_OVERLAY);
+        config.enableStatsNotification = prefs.getBoolean(ENABLE_STATS_NOTIFICATION_STRING, DEFAULT_ENABLE_STATS_NOTIFICATION);
         config.bindAllUsb = prefs.getBoolean(BIND_ALL_USB_STRING, DEFAULT_BIND_ALL_USB);
         config.mouseEmulation = prefs.getBoolean(MOUSE_EMULATION_STRING, DEFAULT_MOUSE_EMULATION);
         config.mouseNavButtons = prefs.getBoolean(MOUSE_NAV_BUTTONS_STRING, DEFAULT_MOUSE_NAV_BUTTONS);

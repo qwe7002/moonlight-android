@@ -55,7 +55,8 @@
         android:gwpAsanMode="always"
         android:localeConfig="@xml/locales_config"
         android:enableOnBackInvokedCallback="false"
-        android:theme="@style/AppTheme">
+        android:theme="@style/AppTheme"
+        android:label="MoonLight">
 
         <provider
             android:name=".PosterContentProvider"

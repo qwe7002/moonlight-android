@@ -12,7 +12,6 @@ import com.limelight.binding.input.touch.RelativeTouchContext;
 import com.limelight.binding.input.driver.UsbDriverService;
 import com.limelight.binding.input.touch.TouchContext;
 import com.limelight.binding.input.virtual_controller.VirtualController;
-import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
@@ -33,10 +32,10 @@ import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
 import com.limelight.utils.ShortcutHelper;
 import com.limelight.utils.SpinnerDialog;
+import com.limelight.utils.StatsNotificationHelper;
 import com.limelight.utils.UiHelper;
 
 import android.annotation.SuppressLint;
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.PictureInPictureParams;
 import android.app.Service;
@@ -48,7 +47,6 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
-import android.graphics.Point;
 import android.graphics.Rect;
 import android.hardware.input.InputManager;
 import android.media.AudioManager;
@@ -147,6 +145,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private MediaCodecDecoderRenderer decoderRenderer;
     private boolean reportedCrash;
     private WifiManager.WifiLock lowLatencyWifiLock;
+    private StatsNotificationHelper statsNotificationHelper;
 
     private boolean connectedToUsbDriverService = false;
     private ServiceConnection usbDriverServiceConnection = new ServiceConnection() {
@@ -337,19 +336,21 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             performanceOverlayView.setVisibility(View.VISIBLE);
         }
 
+        // Check if the user has enabled stats notification
+        if (prefConfig.enableStatsNotification) {
+            statsNotificationHelper = new StatsNotificationHelper(this);
+        }
+
         decoderRenderer = new MediaCodecDecoderRenderer(
                 this,
                 prefConfig,
-                new CrashListener() {
-                    @Override
-                    public void notifyCrash(Exception e) {
-                        // The MediaCodec instance is going down due to a crash
-                        // let's tell the user something when they open the app again
+                e -> {
+                    // The MediaCodec instance is going down due to a crash
+                    // let's tell the user something when they open the app again
 
-                        // We must use commit because the app will crash when we return from this function
-                        tombstonePrefs.edit().putInt("CrashCount", tombstonePrefs.getInt("CrashCount", 0) + 1).commit();
-                        reportedCrash = true;
-                    }
+                    // We must use commit because the app will crash when we return from this function
+                    tombstonePrefs.edit().putInt("CrashCount", tombstonePrefs.getInt("CrashCount", 0) + 1).commit();
+                    reportedCrash = true;
                 },
                 tombstonePrefs.getInt("CrashCount", 0),
                 willStreamHdr,
@@ -912,6 +913,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (connectedToUsbDriverService) {
             // Unbind from the discovery service
             unbindService(usbDriverServiceConnection);
+        }
+
+        // Cancel stats notification
+        if (statsNotificationHelper != null) {
+            statsNotificationHelper.cancelNotification();
         }
 
         // Destroy the capture provider
@@ -2441,6 +2447,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             @Override
             public void run() {
                 performanceOverlayView.setText(text);
+                if (statsNotificationHelper != null) {
+                    statsNotificationHelper.showNotification(text);
+                }
             }
         });
     }
@@ -2471,5 +2480,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             default:
                 return false;
         }
+    }
+
+    public boolean isAutoEnterPip() {
+        return autoEnterPip;
+    }
+
+    public void setAutoEnterPip(boolean autoEnterPip) {
+        this.autoEnterPip = autoEnterPip;
     }
 }
