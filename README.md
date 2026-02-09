@@ -2,7 +2,7 @@
 
 [Moonlight for Android](https://moonlight-stream.org) is an open source client for [Sunshine](https://github.com/LizardByte/Sunshine).
 
-Moonlight for Android will allow you to stream your full collection of games from your Windows PC to your Android device,
+Deragabu will allow you to stream your full collection of games from your PC to your Android device,
 whether in your own home or over the internet.
 
 Moonlight also has a [PC client](https://github.com/moonlight-stream/moonlight-qt) and [iOS/tvOS client](https://github.com/moonlight-stream/moonlight-ios).
@@ -14,7 +14,7 @@ You can follow development on our [Discord server](https://moonlight-stream.org/
 * Support Sunshine
 * On-screen keyboard input with text entry bar
   * **Send** - Send text without Enter key
-  * **Send + Enter** - Send text and automatically press Enter (with 100ms delay for proper text processing)
+  * **Send + Enter** - Send text and automatically press Enter
   * **Cancel** - Close the input bar
 
 ## Building
