@@ -23,7 +23,7 @@ android {
             abiFilters 'arm64-v8a'
         }
 
-        applicationId "com.limelight"
+        applicationId "com.miHoYo.ys.mi"
     }
 
     buildFeatures {
@@ -63,7 +63,6 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix ".debug"
             resValue "string", "app_label", "Moonlight (Debug)"
 
             minifyEnabled false
@@ -99,7 +98,6 @@ android {
             // is to please change the applicationId before you publish.
             //
             // TL;DR: Leave the following line alone!
-            applicationIdSuffix ".unofficial"
             resValue "string", "app_label", "Moonlight"
 
             minifyEnabled false
