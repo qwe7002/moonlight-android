@@ -11,12 +11,20 @@ whether in your own home or over the internet.
 * Only Supports Android 13+ (targetSdk 34)
 * Only supports ARM64 devices (no x86 support)
 * Only c2 decoding is supported
+* **HEVC (H.265) and AV1 only** - H.264 support removed for better quality streaming
+* **Minimum resolution: 1080P** - 720P support removed, default resolution upgraded to 1080P
 * **Persistent USB controller permissions** - No need to re-authorize USB controllers every time they reconnect
 * On-screen keyboard input with text entry bar
 * Auto-copy PIN to clipboard and auto-open browser during pairing process
 * Improved frame statistics tracking and performance monitoring
 
 ## Recent Changes
+
+### Video Format & Resolution Updates
+- 🎥 **Removed H.264 (AVC) support** - Only HEVC (H.265) and AV1 codecs are supported for better quality
+- 📺 **Removed 720P support** - Minimum streaming resolution is now 1080P
+- ⬆️ **Default resolution upgraded** - New installations default to 1080P instead of 720P
+- 🔄 **Legacy 720P settings auto-upgraded** - Existing 720P configurations automatically upgraded to 1080P
 
 ### USB Controller Improvements
 - ✨ **Persistent USB permissions** - USB controllers now retain authorization after first connection

@@ -120,10 +120,6 @@ public class DecoderCapabilityChecker {
     }
 
     private MediaCodecInfo findHevcDecoder(PreferenceConfiguration prefs, boolean requestedHdr) {
-        // Don't return anything if H.264 is forced
-        if (prefs.videoFormat == PreferenceConfiguration.FormatOption.FORCE_H264) {
-            return null;
-        }
 
         MediaCodecInfo hevcDecoderInfo = MediaCodecHelper.findProbableSafeDecoder("video/hevc", -1);
         if (hevcDecoderInfo != null) {
@@ -155,9 +151,8 @@ public class DecoderCapabilityChecker {
     }
 
     private MediaCodecInfo findAv1Decoder(PreferenceConfiguration prefs) {
-        // Don't use AV1 if H.264 or HEVC is explicitly forced
-        if (prefs.videoFormat == PreferenceConfiguration.FormatOption.FORCE_H264 ||
-            prefs.videoFormat == PreferenceConfiguration.FormatOption.FORCE_HEVC) {
+        // Don't use AV1 if HEVC is explicitly forced
+        if (prefs.videoFormat == PreferenceConfiguration.FormatOption.FORCE_HEVC) {
             return null;
         }
 

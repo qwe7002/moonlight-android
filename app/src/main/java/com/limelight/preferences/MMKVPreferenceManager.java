@@ -17,6 +17,7 @@ import java.util.Set;
  */
 public class MMKVPreferenceManager {
     private static final String DEFAULT_MMKV_ID = "default_preferences";
+    private static final String DEFAULTS_INITIALIZED_KEY = "_mmkv_defaults_initialized";
     private static boolean initialized = false;
     private static MMKVPreferenceDataStore dataStoreInstance;
 
@@ -24,6 +25,102 @@ public class MMKVPreferenceManager {
         if (!initialized) {
             MMKV.initialize(context);
             initialized = true;
+
+            // Initialize default values on first run
+            initializeDefaultValues();
+        }
+    }
+
+    /**
+     * Initialize all preference default values in MMKV.
+     * This ensures that all preferences have proper default values on first run.
+     */
+    private static void initializeDefaultValues() {
+        MMKV mmkv = MMKV.mmkvWithID(DEFAULT_MMKV_ID);
+
+        // Check if defaults have already been initialized
+        if (mmkv.decodeBool(DEFAULTS_INITIALIZED_KEY, false)) {
+            return;
+        }
+
+        // Resolution and FPS
+        initializeIfAbsent(mmkv, "list_resolution", "1920x1080");
+        initializeIfAbsent(mmkv, "list_fps", "60");
+
+        // Frame pacing
+        initializeIfAbsent(mmkv, "frame_pacing", "latency");
+
+        // Video settings
+        initializeIfAbsent(mmkv, "checkbox_stretch_video", false);
+        initializeIfAbsent(mmkv, "video_format", "auto");
+        initializeIfAbsent(mmkv, "checkbox_enable_hdr", false);
+        initializeIfAbsent(mmkv, "checkbox_full_range", false);
+
+        // Audio settings
+        initializeIfAbsent(mmkv, "list_audio_config", "2");
+        initializeIfAbsent(mmkv, "checkbox_enable_audiofx", false);
+
+        // Gamepad settings
+        initializeIfAbsent(mmkv, "seekbar_deadzone", 1);
+        initializeIfAbsent(mmkv, "checkbox_multi_controller", true);
+        initializeIfAbsent(mmkv, "checkbox_usb_driver", true);
+        initializeIfAbsent(mmkv, "checkbox_usb_bind_all", true);
+        initializeIfAbsent(mmkv, "checkbox_mouse_emulation", true);
+        initializeIfAbsent(mmkv, "analog_scrolling", "right");
+        initializeIfAbsent(mmkv, "checkbox_vibrate_fallback", true);
+        initializeIfAbsent(mmkv, "seekbar_vibrate_fallback_strength", 100);
+        initializeIfAbsent(mmkv, "checkbox_flip_face_buttons", false);
+        initializeIfAbsent(mmkv, "checkbox_gamepad_touchpad_as_mouse", false);
+        initializeIfAbsent(mmkv, "checkbox_gamepad_motion_sensors", true);
+        initializeIfAbsent(mmkv, "checkbox_gamepad_motion_fallback", false);
+
+        // Input settings
+        initializeIfAbsent(mmkv, "checkbox_touchscreen_trackpad", true);
+        initializeIfAbsent(mmkv, "checkbox_mouse_nav_buttons", false);
+        initializeIfAbsent(mmkv, "checkbox_absolute_mouse_mode", false);
+
+        // On-screen controls
+        initializeIfAbsent(mmkv, "checkbox_show_onscreen_controls", false);
+        initializeIfAbsent(mmkv, "checkbox_vibrate_osc", true);
+        initializeIfAbsent(mmkv, "checkbox_only_show_L3R3", false);
+        initializeIfAbsent(mmkv, "checkbox_show_guide_button", true);
+        initializeIfAbsent(mmkv, "seekbar_osc_opacity", 90);
+
+        // Host settings
+        initializeIfAbsent(mmkv, "checkbox_enable_sops", true);
+        initializeIfAbsent(mmkv, "checkbox_host_audio", false);
+
+        // UI settings
+        initializeIfAbsent(mmkv, "checkbox_enable_pip", false);
+
+        // Advanced settings
+        initializeIfAbsent(mmkv, "checkbox_unlock_fps", false);
+        initializeIfAbsent(mmkv, "checkbox_reduce_refresh_rate", false);
+        initializeIfAbsent(mmkv, "checkbox_disable_warnings", false);
+        initializeIfAbsent(mmkv, "checkbox_enable_perf_overlay", false);
+        initializeIfAbsent(mmkv, "checkbox_enable_stats_notification", true);
+        initializeIfAbsent(mmkv, "checkbox_enable_post_stream_toast", false);
+        initializeIfAbsent(mmkv, "checkbox_enable_mdns", false);
+
+        // Mark defaults as initialized
+        mmkv.encode(DEFAULTS_INITIALIZED_KEY, true);
+    }
+
+    private static void initializeIfAbsent(MMKV mmkv, String key, String value) {
+        if (!mmkv.containsKey(key)) {
+            mmkv.encode(key, value);
+        }
+    }
+
+    private static void initializeIfAbsent(MMKV mmkv, String key, boolean value) {
+        if (!mmkv.containsKey(key)) {
+            mmkv.encode(key, value);
+        }
+    }
+
+    private static void initializeIfAbsent(MMKV mmkv, String key, int value) {
+        if (!mmkv.containsKey(key)) {
+            mmkv.encode(key, value);
         }
     }
 

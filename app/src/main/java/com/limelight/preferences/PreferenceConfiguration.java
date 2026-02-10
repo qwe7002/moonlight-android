@@ -2,6 +2,8 @@ package com.limelight.preferences;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
 import android.os.Build;
 import android.view.Display;
 
@@ -12,7 +14,6 @@ public class PreferenceConfiguration {
         AUTO,
         FORCE_AV1,
         FORCE_HEVC,
-        FORCE_H264,
     }
 
     public enum AnalogStickForScrolling {
@@ -69,13 +70,13 @@ public class PreferenceConfiguration {
     private static final String GAMEPAD_MOTION_FALLBACK_PREF_STRING = "checkbox_gamepad_motion_fallback";
     private static final String ENABLE_MDNS_PREF_STRING = "checkbox_enable_mdns";
 
-    static final String DEFAULT_RESOLUTION = "1280x720";
+    static final String DEFAULT_RESOLUTION = "1920x1080";
     static final String DEFAULT_FPS = "60";
     private static final boolean DEFAULT_STRETCH = false;
     private static final boolean DEFAULT_SOPS = true;
     private static final boolean DEFAULT_DISABLE_TOASTS = false;
     private static final boolean DEFAULT_HOST_AUDIO = false;
-    private static final int DEFAULT_DEADZONE = 7;
+    private static final int DEFAULT_DEADZONE = 1;
     private static final int DEFAULT_OPACITY = 90;
     public static final String DEFAULT_LANGUAGE = "default";
     private static final boolean DEFAULT_MULTI_CONTROLLER = true;
@@ -88,14 +89,14 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_ENABLE_HDR = false;
     private static final boolean DEFAULT_ENABLE_PIP = false;
     private static final boolean DEFAULT_ENABLE_PERF_OVERLAY = false;
-    private static final boolean DEFAULT_ENABLE_STATS_NOTIFICATION = false;
-    private static final boolean DEFAULT_BIND_ALL_USB = false;
+    private static final boolean DEFAULT_ENABLE_STATS_NOTIFICATION = true;
+    private static final boolean DEFAULT_BIND_ALL_USB = true;
     private static final boolean DEFAULT_MOUSE_EMULATION = true;
     private static final String DEFAULT_ANALOG_STICK_FOR_SCROLLING = "right";
     private static final boolean DEFAULT_MOUSE_NAV_BUTTONS = false;
     private static final boolean DEFAULT_UNLOCK_FPS = false;
     private static final boolean DEFAULT_VIBRATE_OSC = true;
-    private static final boolean DEFAULT_VIBRATE_FALLBACK = false;
+    private static final boolean DEFAULT_VIBRATE_FALLBACK = true;
     private static final int DEFAULT_VIBRATE_FALLBACK_STRENGTH = 100;
     private static final boolean DEFAULT_FLIP_FACE_BUTTONS = false;
     private static final boolean DEFAULT_TOUCHSCREEN_TRACKPAD = true;
@@ -109,14 +110,13 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_GAMEPAD_TOUCHPAD_AS_MOUSE = false;
     private static final boolean DEFAULT_GAMEPAD_MOTION_SENSORS = true;
     private static final boolean DEFAULT_GAMEPAD_MOTION_FALLBACK = false;
-    private static final boolean DEFAULT_ENABLE_MDNS = true;
+    private static final boolean DEFAULT_ENABLE_MDNS = false;
 
     public static final int FRAME_PACING_MIN_LATENCY = 0;
     public static final int FRAME_PACING_BALANCED = 1;
     public static final int FRAME_PACING_CAP_FPS = 2;
     public static final int FRAME_PACING_MAX_SMOOTHNESS = 3;
 
-    public static final String RES_720P = "1280x720";
     public static final String RES_1080P = "1920x1080";
     public static final String RES_1440P = "2560x1440";
     public static final String RES_4K = "3840x2160";
@@ -166,9 +166,6 @@ public class PreferenceConfiguration {
         else if (width == 854 && height == 480) {
             return false;
         }
-        else if (width == 1280 && height == 720) {
-            return false;
-        }
         else if (width == 1920 && height == 1080) {
             return false;
         }
@@ -199,7 +196,7 @@ public class PreferenceConfiguration {
 
     private static String convertFromLegacyResolutionString(String resString) {
         if (resString.equalsIgnoreCase("720p")) {
-            return RES_720P;
+            return RES_1080P;
         }
         else if (resString.equalsIgnoreCase("1080p")) {
             return RES_1080P;
@@ -212,7 +209,7 @@ public class PreferenceConfiguration {
         }
         else {
             // Should be unreachable
-            return RES_720P;
+            return RES_1080P;
         }
     }
 
@@ -226,44 +223,76 @@ public class PreferenceConfiguration {
 
     private static String getResolutionString(int width, int height) {
         switch (height) {
-            case 1080:
-                return RES_1080P;
             case 1440:
                 return RES_1440P;
             case 2160:
                 return RES_4K;
             default:
-                return RES_720P;
+                return RES_1080P;
         }
     }
 
     public static int getDefaultBitrate(String resString, String fpsString) {
+        return getDefaultBitrate(resString, fpsString, FormatOption.AUTO);
+    }
+
+    /**
+     * Detects the best available decoder on the device.
+     * Priority: AV1 > HEVC
+     * @return FormatOption representing the best available codec
+     */
+    private static FormatOption getBestAvailableCodecFormat() {
+        MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
+        boolean hasHevc = false;
+        boolean hasAv1 = false;
+
+        for (MediaCodecInfo codecInfo : codecList.getCodecInfos()) {
+            // Skip encoders
+            if (codecInfo.isEncoder()) {
+                continue;
+            }
+
+            // Skip software decoders for efficiency consideration
+            if (codecInfo.isSoftwareOnly()) {
+                continue;
+            }
+
+            for (String mimeType : codecInfo.getSupportedTypes()) {
+                if (mimeType.equalsIgnoreCase("video/av01")) {
+                    hasAv1 = true;
+                } else if (mimeType.equalsIgnoreCase("video/hevc")) {
+                    hasHevc = true;
+                }
+            }
+        }
+
+        // Return the best available codec
+        if (hasAv1) {
+            return FormatOption.FORCE_AV1;
+        } else if (hasHevc) {
+            return FormatOption.FORCE_HEVC;
+        } else {
+            return FormatOption.AUTO; // Fallback to H.264 baseline
+        }
+    }
+
+    public static int getDefaultBitrate(String resString, String fpsString, FormatOption videoFormat) {
         int width = getWidthFromResolutionString(resString);
         int height = getHeightFromResolutionString(resString);
         int fps = Integer.parseInt(fpsString);
-
-        // This logic is shamelessly stolen from Moonlight Qt:
-        // https://github.com/moonlight-stream/moonlight-qt/blob/master/app/settings/streamingpreferences.cpp
 
         // Don't scale bitrate linearly beyond 60 FPS. It's definitely not a linear
         // bitrate increase for frame rate once we get to values that high.
         double frameRateFactor = (fps <= 60 ? fps : (Math.sqrt(fps / 60.f) * 60.f)) / 30.f;
 
-        // TODO: Collect some empirical data to see if these defaults make sense.
         // We're just using the values that the Shield used, as we have for years.
         int[] pixelVals = {
-            640 * 360,
-            854 * 480,
-            1280 * 720,
             1920 * 1080,
             2560 * 1440,
             3840 * 2160,
             -1,
         };
         int[] factorVals = {
-            1,
-            2,
-            5,
             10,
             20,
             40,
@@ -297,7 +326,29 @@ public class PreferenceConfiguration {
             }
         }
 
-        return (int)Math.round(resolutionFactor * frameRateFactor) * 1000;
+        int baseBitrate = (int)Math.round(resolutionFactor * frameRateFactor) * 1000;
+
+        // Determine the effective codec format for bitrate calculation
+        FormatOption effectiveFormat = videoFormat;
+        if (videoFormat == FormatOption.AUTO) {
+            // For AUTO mode, detect the best available codec on the device
+            effectiveFormat = getBestAvailableCodecFormat();
+        }
+
+        // Adjust bitrate based on codec efficiency
+        // HEVC is ~30-40% more efficient than H.264
+        // AV1 is ~50% more efficient than H.264
+        switch (effectiveFormat) {
+            case FORCE_HEVC:
+                // HEVC needs ~70% of H.264 bitrate for same quality
+                return (int)(baseBitrate * 0.7);
+            case FORCE_AV1:
+                // AV1 needs ~50% of H.264 bitrate for same quality
+                return (int)(baseBitrate * 0.5);
+            default:
+                // Fallback to H.264 baseline (no efficient decoder found)
+                return baseBitrate;
+        }
     }
 
     public static boolean getDefaultSmallMode(Context context) {
@@ -310,7 +361,8 @@ public class PreferenceConfiguration {
         SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
         return getDefaultBitrate(
                 prefs.getString(RESOLUTION_PREF_STRING, DEFAULT_RESOLUTION),
-                prefs.getString(FPS_PREF_STRING, DEFAULT_FPS));
+                prefs.getString(FPS_PREF_STRING, DEFAULT_FPS),
+                getVideoFormatValue(context));
     }
 
     @SuppressWarnings("deprecation")
@@ -325,8 +377,6 @@ public class PreferenceConfiguration {
                 return FormatOption.FORCE_AV1;
             case "forceh265":
                 return FormatOption.FORCE_HEVC;
-            case "neverh265":
-                return FormatOption.FORCE_H264;
             default:
                 // Should never get here
                 return FormatOption.AUTO;
@@ -428,14 +478,11 @@ public class PreferenceConfiguration {
         if (str != null) {
             switch (str) {
                 case "720p30":
-                    config.width = 1280;
-                    config.height = 720;
-                    config.fps = 30;
-                    break;
                 case "720p60":
-                    config.width = 1280;
-                    config.height = 720;
-                    config.fps = 60;
+                    // Upgrade 720p to 1080p
+                    config.width = 1920;
+                    config.height = 1080;
+                    config.fps = str.endsWith("30") ? 30 : 60;
                     break;
                 case "1080p30":
                     config.width = 1920;
@@ -459,8 +506,8 @@ public class PreferenceConfiguration {
                     break;
                 default:
                     // Should never get here
-                    config.width = 1280;
-                    config.height = 720;
+                    config.width = 1920;
+                    config.height = 1080;
                     config.fps = 60;
                     break;
             }

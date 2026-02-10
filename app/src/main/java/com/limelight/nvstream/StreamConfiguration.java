@@ -24,7 +24,6 @@ public class StreamConfiguration {
     private MoonBridge.AudioConfiguration audioConfiguration;
     private int supportedVideoFormats;
     private int attachedGamepadMask;
-    private int encryptionFlags;
     private int colorRange;
     private int colorSpace;
     private boolean persistGamepadsAfterDisconnect;
@@ -136,8 +135,8 @@ public class StreamConfiguration {
     private StreamConfiguration() {
         // Set default attributes
         this.app = new NvApp("Steam");
-        this.width = 1280;
-        this.height = 720;
+        this.width = 1920;
+        this.height = 1080;
         this.refreshRate = 60;
         this.launchRefreshRate = 60;
         this.bitrate = 10000;
@@ -145,9 +144,14 @@ public class StreamConfiguration {
         this.remote = STREAM_CFG_AUTO;
         this.sops = true;
         this.enableAdaptiveResolution = false;
+        this.playLocalAudio = false;
         this.audioConfiguration = MoonBridge.AUDIO_CONFIGURATION_STEREO;
-        this.supportedVideoFormats = MoonBridge.VIDEO_FORMAT_H264;
+        this.supportedVideoFormats = MoonBridge.VIDEO_FORMAT_H265;
         this.attachedGamepadMask = 0;
+        this.clientRefreshRateX100 = 6000;
+        this.colorRange = 0;
+        this.colorSpace = 0;
+        this.persistGamepadsAfterDisconnect = false;
     }
     
     public int getWidth() {

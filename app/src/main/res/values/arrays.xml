@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string-array name="resolution_names">
-        <item>@string/resolution_720p</item>
         <item>@string/resolution_1080p</item>
         <item>@string/resolution_1440p</item>
         <item>@string/resolution_4k</item>
@@ -9,7 +8,6 @@
 
     <!-- Keep this in sync with PreferenceConfiguration.isNativeResolution()! -->
     <string-array name="resolution_values" translatable="false">
-        <item>1280x720</item>
         <item>1920x1080</item>
         <item>2560x1440</item>
         <item>3840x2160</item>
@@ -53,13 +51,11 @@
         <item>@string/videoformat_auto</item>
         <item>@string/videoformat_av1always</item>
         <item>@string/videoformat_hevcalways</item>
-        <item>@string/videoformat_h264always</item>
     </string-array>
     <string-array name="video_format_values" translatable="false">
         <item>auto</item>
         <item>forceav1</item>
         <item>forceh265</item>
-        <item>neverh265</item>
     </string-array>
 
     <string-array name="video_frame_pacing_names">

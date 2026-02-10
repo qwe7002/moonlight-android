@@ -488,30 +488,18 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             Toast.makeText(this, "Decoder does not support HDR10 profile", Toast.LENGTH_LONG).show();
         }
 
-        // Display a message to the user if HEVC was forced on but we still didn't find a decoder
-        if (prefConfig.videoFormat == PreferenceConfiguration.FormatOption.FORCE_HEVC && !decoderRenderer.isHevcSupported()) {
-            Toast.makeText(this, "No HEVC decoder found", Toast.LENGTH_LONG).show();
-        }
-
         // Display a message to the user if AV1 was forced on but we still didn't find a decoder
         if (prefConfig.videoFormat == PreferenceConfiguration.FormatOption.FORCE_AV1 && !decoderRenderer.isAv1Supported()) {
             Toast.makeText(this, "No AV1 decoder found", Toast.LENGTH_LONG).show();
         }
 
-        // H.264 is always supported
-        int supportedVideoFormats = MoonBridge.VIDEO_FORMAT_H264;
-        if (decoderRenderer.isHevcSupported()) {
-            supportedVideoFormats |= MoonBridge.VIDEO_FORMAT_H265;
-            if (willStreamHdr && decoderRenderer.isHevcMain10Hdr10Supported()) {
-                supportedVideoFormats |= MoonBridge.VIDEO_FORMAT_H265_MAIN10;
-            }
+        // Display a message to the user if HEVC was forced on but we still didn't find a decoder
+        if (prefConfig.videoFormat == PreferenceConfiguration.FormatOption.FORCE_HEVC && !decoderRenderer.isHevcSupported()) {
+            Toast.makeText(this, "No HEVC decoder found", Toast.LENGTH_LONG).show();
         }
-        if (decoderRenderer.isAv1Supported()) {
-            supportedVideoFormats |= MoonBridge.VIDEO_FORMAT_AV1_MAIN8;
-            if (willStreamHdr && decoderRenderer.isAv1Main10Supported()) {
-                supportedVideoFormats |= MoonBridge.VIDEO_FORMAT_AV1_MAIN10;
-            }
-        }
+
+        // Start with HEVC as the base supported format
+        int supportedVideoFormats = getSupportedVideoFormats(willStreamHdr);
 
         int gamepadMask = ControllerHandler.getAttachedControllerMask(this);
         if (!prefConfig.multiController) {
@@ -620,6 +608,21 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         // The connection will be started when the surface gets created
         streamView.getHolder().addCallback(this);
+    }
+
+    private int getSupportedVideoFormats(boolean willStreamHdr) {
+        int supportedVideoFormats = MoonBridge.VIDEO_FORMAT_H265;
+        if (willStreamHdr && decoderRenderer.isHevcMain10Hdr10Supported()) {
+            supportedVideoFormats |= MoonBridge.VIDEO_FORMAT_H265_MAIN10;
+        }
+
+        if (decoderRenderer.isAv1Supported()) {
+            supportedVideoFormats |= MoonBridge.VIDEO_FORMAT_AV1_MAIN8;
+            if (willStreamHdr && decoderRenderer.isAv1Main10Supported()) {
+                supportedVideoFormats |= MoonBridge.VIDEO_FORMAT_AV1_MAIN10;
+            }
+        }
+        return supportedVideoFormats;
     }
 
     private void setPreferredOrientationForCurrentDisplay() {

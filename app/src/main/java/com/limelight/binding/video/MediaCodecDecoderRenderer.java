@@ -287,8 +287,8 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
             }
 
             // Initialize CSD processor with H.264 specific settings
-            csdProcessor.initialize(selectedDecoderInfo.getName(), initialWidth, initialHeight,
-                    refreshRate, capabilityChecker.isRefFrameInvalidationAvc());
+            csdProcessor.initialize(selectedDecoderInfo.getName()
+            );
 
             refFrameInvalidationActive = capabilityChecker.isRefFrameInvalidationAvc();
         } else if ((videoFormat & MoonBridge.VIDEO_FORMAT_MASK_H265) != 0) {
@@ -326,24 +326,19 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         // Configure recovery manager
         recoveryManager.setHasChoreographerThread(prefs.framePacing == PreferenceConfiguration.FRAME_PACING_BALANCED);
 
-        for (int tryNumber = 0; ; tryNumber++) {
-            LimeLog.info("Decoder configuration try: " + tryNumber);
+        // Force low-latency decoder: Only try with all low-latency options enabled (tryNumber=0)
+        // Do not allow fallback to non-low-latency options
+        LimeLog.info("Decoder configuration: Forcing low-latency mode");
 
-            MediaFormat mediaFormat = createBaseMediaFormat(mimeType);
+        MediaFormat mediaFormat = createBaseMediaFormat(mimeType);
 
-            // This will try low latency options until we find one that works (or we give up).
-            boolean newFormat = MediaCodecHelper.setDecoderLowLatencyOptions(mediaFormat, selectedDecoderInfo, tryNumber);
+        // Set all low latency options (tryNumber=0 means all options enabled)
+        MediaCodecHelper.setDecoderLowLatencyOptions(mediaFormat, selectedDecoderInfo, 0);
 
-            // Throw the underlying codec exception on the last attempt if the caller requested it
-            if (tryConfigureDecoder(selectedDecoderInfo, mediaFormat, !newFormat && throwOnCodecError)) {
-                // Success!
-                break;
-            }
-
-            if (!newFormat) {
-                // We couldn't even configure a decoder without any low latency options
-                return -5;
-            }
+        // Try to configure the decoder with low-latency options
+        if (!tryConfigureDecoder(selectedDecoderInfo, mediaFormat, throwOnCodecError)) {
+            LimeLog.severe("Low-latency decoder required but configuration failed. Aborting without fallback.");
+            return -5;
         }
 
         if (USE_FRAME_RENDER_TIME) {
@@ -839,6 +834,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         recoveryManager.scheduleRestartForHdrChange();
     }
 
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     private boolean queueNextInputBuffer(long timestampUs, int codecFlags) {
         boolean codecRecovered;
 
@@ -936,12 +932,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         return submitFrameData(decodeUnitData, decodeUnitLength, frameType, enqueueTimeMs, csdSubmittedForThisFrame);
     }
 
-    private int handleIdrFrameCsd(int decodeUnitType, byte[] decodeUnitData, int decodeUnitLength) {
-        // H264 SPS
-        if (decodeUnitType == MoonBridge.BUFFER_TYPE_SPS && (videoFormat & MoonBridge.VIDEO_FORMAT_MASK_H264) != 0) {
-            csdProcessor.processH264Sps(decodeUnitData, decodeUnitLength);
-            return MoonBridge.DR_OK;
-        } else if (decodeUnitType == MoonBridge.BUFFER_TYPE_VPS) {
+    private int handleIdrFrameCsd(int decodeUnitType, byte[] decodeUnitData, int decodeUnitLength) {if (decodeUnitType == MoonBridge.BUFFER_TYPE_VPS) {
             csdProcessor.processVps(decodeUnitData, decodeUnitLength);
             return MoonBridge.DR_OK;
         } else if (decodeUnitType == MoonBridge.BUFFER_TYPE_SPS) {
@@ -974,14 +965,6 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
             }
 
             submittedCsd = true;
-
-            if (csdProcessor.isNeedsBaselineSpsHack()) {
-                csdProcessor.setNeedsBaselineSpsHack(false);
-                if (!replaySps()) {
-                    return MoonBridge.DR_NEED_IDR;
-                }
-                LimeLog.info("SPS replay complete");
-            }
         }
 
         return MoonBridge.DR_OK;
@@ -1050,19 +1033,6 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         return true;
     }
 
-    private boolean replaySps() {
-        if (!fetchNextInputBuffer()) {
-            return false;
-        }
-
-        byte[] replayBuffer = csdProcessor.createSpsReplayBuffer();
-        if (replayBuffer != null) {
-            nextInputBuffer.put(replayBuffer);
-        }
-
-        // Queue the new SPS
-        return queueNextInputBuffer(0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG);
-    }
 
     @Override
     public int getCapabilities() {
@@ -1072,9 +1042,6 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         capabilities |= MoonBridge.CAPABILITY_SLICES_PER_FRAME(capabilityChecker.getOptimalSlicesPerFrame());
 
         // Enable reference frame invalidation on supported hardware
-        if (capabilityChecker.isRefFrameInvalidationAvc()) {
-            capabilities |= MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC;
-        }
         if (capabilityChecker.isRefFrameInvalidationHevc()) {
             capabilities |= MoonBridge.CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC;
         }

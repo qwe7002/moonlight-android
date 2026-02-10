@@ -1,6 +1,49 @@
 # Moonlight Android 修改總結
 
-## 1. USB 權限持續授權與 Razer Kishi 系列支持
+## 1. 移除 H.264 和 720P 支持
+
+### 目的
+專注於高質量串流體驗，移除較舊的編碼格式和低分辨率選項。
+
+### 修改內容
+
+#### 視頻格式
+- **移除 H.264 (AVC) 支持**:
+  - 從 `FormatOption` 枚舉中移除 `FORCE_H264` 選項
+  - 從視頻格式選擇數組中移除 H.264 選項
+  - 更新 `Game.java` 中的支持格式檢測，改為以 HEVC 為基礎
+  - 移除 `DecoderCapabilityChecker` 中的 H.264 強制檢查
+  - 默認支持格式從 `VIDEO_FORMAT_H264` 改為 `VIDEO_FORMAT_H265`
+
+#### 分辨率
+- **移除 720P (1280x720) 支持**:
+  - 從 `arrays.xml` 分辨率列表中移除 720P 選項
+  - 從 `PreferenceConfiguration` 中移除 `RES_720P` 常量
+  - 更新 `isNativeResolution()` 方法，移除 720P 檢查
+  - 默認分辨率從 720P 升級到 1080P
+  - 更新 `StreamConfiguration` 默認寬高為 1920x1080
+
+#### 向後兼容
+- **自動升級舊設置**:
+  - `convertFromLegacyResolutionString()` 將 720P 映射到 1080P
+  - `readPreferences()` 中的舊版本 720P 設置自動升級為 1080P
+  - 比特率計算表中移除 720P 條目，重新調整插值
+
+### 影響的文件
+1. **arrays.xml**: 移除 720P 和 H.264 選項
+2. **PreferenceConfiguration.java**: 更新默認值和枚舉
+3. **StreamConfiguration.java**: 更新默認分辨率和視頻格式
+4. **Game.java**: 移除 H.264 支持檢測
+5. **DecoderCapabilityChecker.java**: 移除 FORCE_H264 檢查
+
+### 效果
+- 所有串流現在至少使用 1080P 分辨率
+- 僅支持 HEVC (H.265) 和 AV1 編碼
+- 舊設備上配置的 720P 會自動升級到 1080P
+- 提升整體串流質量和性能
+- 簡化設置選項，減少用戶混淆
+
+## 2. USB 權限持續授權與 Razer Kishi 系列支持
 
 ### 問題
 每次連接 USB 遊戲控制器時，Android 都會要求重新授予 USB 權限。這會打斷遊戲體驗。
