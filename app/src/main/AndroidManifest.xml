@@ -31,6 +31,9 @@
     <uses-feature
         android:name="android.hardware.sensor.gyroscope"
         android:required="false" />
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -83,7 +86,8 @@
             android:resizeableActivity="true"
             android:screenOrientation="landscape"
             android:enableOnBackInvokedCallback="true"
-            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
+            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
+            tools:ignore="DiscouragedApi">
 
             <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
@@ -104,7 +108,8 @@
             android:resizeableActivity="true"
             android:screenOrientation="landscape"
             android:enableOnBackInvokedCallback="true"
-            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
+            tools:ignore="DiscouragedApi">
             <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
@@ -113,7 +118,8 @@
             android:resizeableActivity="true"
             android:screenOrientation="landscape"
             android:enableOnBackInvokedCallback="true"
-            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
+            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
+            tools:ignore="DiscouragedApi">
             <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
@@ -123,18 +129,8 @@
             android:screenOrientation="landscape"
             android:enableOnBackInvokedCallback="true"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
-            android:label="Streaming Settings">
-            <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
-            <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
-        </activity>
-        <activity
-            android:name=".preferences.AddComputerManually"
-            android:resizeableActivity="true"
-            android:screenOrientation="landscape"
-            android:windowSoftInputMode="stateVisible"
-            android:enableOnBackInvokedCallback="true"
-            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
-            android:label="Add Computer Manually">
+            android:label="Streaming Settings"
+            tools:ignore="DiscouragedApi">
             <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
@@ -151,7 +147,8 @@
             android:theme="@style/StreamTheme"
             android:preferMinimalPostProcessing="true"
             android:directBootAware="true"
-            android:exported="true">
+            android:exported="true"
+            tools:ignore="DiscouragedApi">
 
             <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
@@ -196,7 +193,8 @@
             android:resizeableActivity="true"
             android:screenOrientation="landscape"
             android:enableOnBackInvokedCallback="true"
-            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
+            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection"
+            tools:ignore="DiscouragedApi">
             <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
