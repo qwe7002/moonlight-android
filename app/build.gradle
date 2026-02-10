@@ -23,7 +23,7 @@ android {
             abiFilters 'arm64-v8a'
         }
 
-        applicationId "com.antutu.ABenchMark"
+        applicationId "com.qwe7002.deragabu"
     }
 
     buildFeatures {

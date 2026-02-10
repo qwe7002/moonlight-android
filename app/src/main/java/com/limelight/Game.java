@@ -760,13 +760,27 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private boolean isRefreshRateEqualMatch(float refreshRate) {
-        return refreshRate >= prefConfig.fps &&
-                refreshRate <= prefConfig.fps + 3;
+
+
+        // Allow a small tolerance for floating point comparison
+        // Match if refresh rate is within [fps, fps + 3] range
+        // This handles cases like 59.94 Hz for 60 FPS
+        float tolerance = 0.5f;
+        return refreshRate >= prefConfig.fps - tolerance &&
+                refreshRate <= prefConfig.fps + 3 + tolerance;
     }
 
     private boolean isRefreshRateGoodMatch(float refreshRate) {
-        return refreshRate >= prefConfig.fps &&
-                Math.round(refreshRate) % prefConfig.fps <= 3;
+        // A "good" match is when the display refresh rate is a multiple of the target FPS
+        // or close enough that frame pacing will work well
+        if (refreshRate < prefConfig.fps - 0.5f) {
+            return false;
+        }
+
+        // Check if refresh rate is close to target FPS or a multiple of it
+        float ratio = refreshRate / prefConfig.fps;
+        float remainder = ratio - Math.round(ratio);
+        return Math.abs(remainder) <= 0.1f;
     }
 
     private boolean shouldIgnoreInsetsForResolution(int width, int height) {
@@ -793,91 +807,141 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 (prefConfig.framePacing == PreferenceConfiguration.FRAME_PACING_BALANCED && prefConfig.reduceRefreshRate);
     }
 
+    /**
+     * Calculate a score for a display mode based on how well it matches the streaming requirements.
+     * Higher scores are better.
+     *
+     * @param mode The display mode to evaluate
+     * @param currentMode The current display mode (used for preference when scores are equal)
+     * @param isNativeResolutionStream Whether the stream uses native resolution
+     * @return A score indicating how suitable this mode is (higher is better)
+     */
+    private int calculateModeScore(Display.Mode mode, Display.Mode currentMode, boolean isNativeResolutionStream) {
+        int score = 0;
+
+        float refreshRate = mode.getRefreshRate();
+        int modeWidth = mode.getPhysicalWidth();
+        int modeHeight = mode.getPhysicalHeight();
+
+        // === Resolution scoring (0-100 points) ===
+        boolean resolutionFitsStream = modeWidth >= prefConfig.width && modeHeight >= prefConfig.height;
+
+        if (resolutionFitsStream) {
+            // Resolution fits the stream - give base points
+            score += 50;
+
+            // Bonus for exact resolution match
+            if (modeWidth == prefConfig.width && modeHeight == prefConfig.height) {
+                score += 30;
+            }
+            // Penalty for excessive resolution (wastes bandwidth/power)
+            else {
+                int excessPixels = (modeWidth * modeHeight) - (prefConfig.width * prefConfig.height);
+                int penaltyPercent = Math.min(20, excessPixels / 100000);
+                score -= penaltyPercent;
+            }
+        } else {
+            // Resolution doesn't fit - significant penalty
+            score -= 50;
+        }
+
+        // === Refresh rate scoring (0-200 points) ===
+        if (isRefreshRateEqualMatch(refreshRate)) {
+            // Perfect or near-perfect refresh rate match
+            score += 200;
+
+            // Extra bonus for exact FPS match
+            if (Math.abs(refreshRate - prefConfig.fps) < 1.0f) {
+                score += 50;
+            }
+        } else if (isRefreshRateGoodMatch(refreshRate)) {
+            // Good match (multiple of target FPS)
+            score += 150;
+
+            // Prefer lower multiples (e.g., 120Hz for 60fps is better than 180Hz)
+            float ratio = refreshRate / prefConfig.fps;
+            if (ratio <= 2.1f) {
+                score += 20;
+            }
+        } else if (refreshRate >= prefConfig.fps) {
+            // At least meets minimum FPS requirement
+            score += 50;
+        }
+
+        // === Frame pacing preference adjustments ===
+        if (mayReduceRefreshRate()) {
+            // User prefers lower refresh rate for power saving
+            // Penalize unnecessarily high refresh rates
+            if (refreshRate > prefConfig.fps + 5) {
+                float excessRatio = refreshRate / prefConfig.fps;
+                score -= (int)(excessRatio * 10);
+            }
+        } else {
+            // User prefers higher refresh rate for smoothness
+            // Bonus for higher refresh rates (diminishing returns)
+            if (refreshRate > prefConfig.fps) {
+                score += Math.min(30, (int)((refreshRate - prefConfig.fps) / 2));
+            }
+        }
+
+        // === Stability preference ===
+        // Small bonus for staying with current mode to avoid unnecessary mode switches
+        if (mode.getModeId() == currentMode.getModeId()) {
+            score += 5;
+        }
+
+        // === Native resolution stream special handling ===
+        if (isNativeResolutionStream) {
+            // For native resolution, exact display resolution match is critical
+            if (modeWidth == prefConfig.width && modeHeight == prefConfig.height) {
+                score += 100;
+            }
+        }
+
+        return score;
+    }
+
     private float prepareDisplayForRendering() {
         Display display = getWindowManager().getDefaultDisplay();
         WindowManager.LayoutParams windowLayoutParams = getWindow().getAttributes();
         float displayRefreshRate;
 
         // On M, we can explicitly set the optimal display mode
-        Display.Mode bestMode = display.getMode();
+        Display.Mode currentMode = display.getMode();
+        Display.Mode bestMode = currentMode;
         boolean isNativeResolutionStream = PreferenceConfiguration.isNativeResolution(prefConfig.width, prefConfig.height);
-        boolean refreshRateIsGood = isRefreshRateGoodMatch(bestMode.getRefreshRate());
-        boolean refreshRateIsEqual = isRefreshRateEqualMatch(bestMode.getRefreshRate());
 
-        LimeLog.info("Current display mode: " + bestMode.getPhysicalWidth() + "x" +
-                bestMode.getPhysicalHeight() + "x" + bestMode.getRefreshRate());
+        LimeLog.info("Current display mode: " + currentMode.getPhysicalWidth() + "x" +
+                currentMode.getPhysicalHeight() + "x" + currentMode.getRefreshRate());
+        LimeLog.info("Target stream: " + prefConfig.width + "x" + prefConfig.height + "@" + prefConfig.fps + " FPS");
 
-        for (Display.Mode candidate : display.getSupportedModes()) {
-            boolean refreshRateReduced = candidate.getRefreshRate() < bestMode.getRefreshRate();
-            boolean resolutionReduced = candidate.getPhysicalWidth() < bestMode.getPhysicalWidth() ||
-                    candidate.getPhysicalHeight() < bestMode.getPhysicalHeight();
-            boolean resolutionFitsStream = candidate.getPhysicalWidth() >= prefConfig.width &&
-                    candidate.getPhysicalHeight() >= prefConfig.height;
+        // Collect all suitable display modes and score them
+        Display.Mode[] supportedModes = display.getSupportedModes();
+        int bestScore = calculateModeScore(bestMode, currentMode, isNativeResolutionStream);
 
+        for (Display.Mode candidate : supportedModes) {
             LimeLog.info("Examining display mode: " + candidate.getPhysicalWidth() + "x" +
                     candidate.getPhysicalHeight() + "x" + candidate.getRefreshRate());
 
+            // Skip resolutions above 4K for non-4K streams (safety check)
             if (candidate.getPhysicalWidth() > 4096 && prefConfig.width <= 4096) {
-                // Avoid resolutions options above 4K to be safe
+                LimeLog.info("  Skipped: resolution above 4K for non-4K stream");
                 continue;
             }
 
-            // On non-4K streams, we force the resolution to never change unless it's above
-            // 60 FPS, which may require a resolution reduction due to HDMI bandwidth limitations,
-            // or it's a native resolution stream.
-            if (prefConfig.width < 3840 && prefConfig.fps <= 60 && !isNativeResolutionStream) {
-                if (display.getMode().getPhysicalWidth() != candidate.getPhysicalWidth() ||
-                        display.getMode().getPhysicalHeight() != candidate.getPhysicalHeight()) {
-                    continue;
-                }
+            // Calculate score for this candidate
+            int candidateScore = calculateModeScore(candidate, currentMode, isNativeResolutionStream);
+
+            LimeLog.info("  Score: " + candidateScore + " (best so far: " + bestScore + ")");
+
+            if (candidateScore > bestScore) {
+                bestMode = candidate;
+                bestScore = candidateScore;
             }
-
-            // Make sure the resolution doesn't regress unless if it's over 60 FPS
-            // where we may need to reduce resolution to achieve the desired refresh rate.
-            if (resolutionReduced && !(prefConfig.fps > 60 && resolutionFitsStream)) {
-                continue;
-            }
-
-            if (mayReduceRefreshRate() && refreshRateIsEqual && !isRefreshRateEqualMatch(candidate.getRefreshRate())) {
-                // If we had an equal refresh rate and this one is not, skip it. In min latency
-                // mode, we want to always prefer the highest frame rate even though it may cause
-                // microstuttering.
-                continue;
-            } else if (refreshRateIsGood) {
-                // We've already got a good match, so if this one isn't also good, it's not
-                // worth considering at all.
-                if (!isRefreshRateGoodMatch(candidate.getRefreshRate())) {
-                    continue;
-                }
-
-                if (mayReduceRefreshRate()) {
-                    // User asked for the lowest possible refresh rate, so don't raise it if we
-                    // have a good match already
-                    if (candidate.getRefreshRate() > bestMode.getRefreshRate()) {
-                        continue;
-                    }
-                } else {
-                    // User asked for the highest possible refresh rate, so don't reduce it if we
-                    // have a good match already
-                    if (refreshRateReduced) {
-                        continue;
-                    }
-                }
-            } else if (!isRefreshRateGoodMatch(candidate.getRefreshRate())) {
-                // We didn't have a good match and this match isn't good either, so just don't
-                // reduce the refresh rate.
-                if (refreshRateReduced) {
-                    continue;
-                }
-            }
-
-            bestMode = candidate;
-            refreshRateIsGood = isRefreshRateGoodMatch(candidate.getRefreshRate());
-            refreshRateIsEqual = isRefreshRateEqualMatch(candidate.getRefreshRate());
         }
 
         LimeLog.info("Best display mode: " + bestMode.getPhysicalWidth() + "x" +
-                bestMode.getPhysicalHeight() + "x" + bestMode.getRefreshRate());
+                bestMode.getPhysicalHeight() + "x" + bestMode.getRefreshRate() + " (score: " + bestScore + ")");
 
         // Only apply new window layout parameters if we've actually changed the display mode
         if (display.getMode().getModeId() != bestMode.getModeId()) {
@@ -922,27 +986,24 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     @SuppressLint("InlinedApi")
-    private final Runnable hideSystemUi = new Runnable() {
-        @Override
-        public void run() {
-            // TODO: Do we want to use WindowInsetsController here on R+ instead of
-            // SYSTEM_UI_FLAG_IMMERSIVE_STICKY? They seem to do the same thing as of S...
+    private final Runnable hideSystemUi = () -> {
+        // TODO: Do we want to use WindowInsetsController here on R+ instead of
+        // SYSTEM_UI_FLAG_IMMERSIVE_STICKY? They seem to do the same thing as of S...
 
-            // In multi-window mode on N+, we need to drop our layout flags or we'll
-            // be drawing underneath the system UI.
-            if (isInMultiWindowMode()) {
-                Game.this.getWindow().getDecorView().setSystemUiVisibility(
-                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-            } else {
-                // Use immersive mode
-                Game.this.getWindow().getDecorView().setSystemUiVisibility(
-                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
-                                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
-                                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
-                                View.SYSTEM_UI_FLAG_FULLSCREEN |
-                                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
-            }
+        // In multi-window mode on N+, we need to drop our layout flags or we'll
+        // be drawing underneath the system UI.
+        if (isInMultiWindowMode()) {
+            Game.this.getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        } else {
+            // Use immersive mode
+            Game.this.getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+                            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
+                            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+                            View.SYSTEM_UI_FLAG_FULLSCREEN |
+                            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         }
     };
 
