@@ -187,7 +187,6 @@
             android:label="Usb Driver Service"
             android:exported="false" />
 
-
         <activity
             android:name=".HelpActivity"
             android:resizeableActivity="true"
