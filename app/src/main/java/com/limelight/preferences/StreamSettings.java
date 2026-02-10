@@ -264,10 +264,17 @@ public class StreamSettings extends AppCompatActivity {
                     break;
             }
 
+            int newBitrate = PreferenceConfiguration.getDefaultBitrate(res, fps, videoFormat);
+
             prefs.edit()
-                    .putInt(PreferenceConfiguration.BITRATE_PREF_STRING,
-                            PreferenceConfiguration.getDefaultBitrate(res, fps, videoFormat))
+                    .putInt(PreferenceConfiguration.BITRATE_PREF_STRING, newBitrate)
                     .apply();
+
+            // Update the SeekBarPreference UI
+            SeekBarPreference bitratePref = findPreference(PreferenceConfiguration.BITRATE_PREF_STRING);
+            if (bitratePref != null) {
+                bitratePref.setValue(newBitrate);
+            }
         }
 
         @Override
