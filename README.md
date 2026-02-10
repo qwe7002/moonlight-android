@@ -29,7 +29,6 @@ whether in your own home or over the internet.
 - ⌨️ **Send + Enter button** - New button to send text and automatically press Enter key
 
 ### Pairing Process Improvements
-- 🔒 Fixed pairing port selection - Now correctly uses HTTP port (47989) instead of HTTPS port
 - 📋 **Auto-copy PIN to clipboard** - PIN code is automatically copied when pairing starts
 - 🌐 **Auto-open browser** - Browser automatically opens to server's web interface during pairing
 - 📱 Added Android 13+ notification permission handling for foreground service
