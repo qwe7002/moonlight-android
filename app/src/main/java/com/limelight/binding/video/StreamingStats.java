@@ -33,11 +33,15 @@ public class StreamingStats {
     // Decoding stats
     public final float decodeTimeMs;
 
+    // Gamepad info
+    public final int gamepadCount;
+    public final int gamepadVibrationCount;
+
     public StreamingStats(String resolution, float totalFps, String decoderName,
                           float receivedFps, float renderedFps,
                           float networkDropPercentage, int networkLatencyMs, int networkLatencyVarianceMs,
                           float minHostLatencyMs, float maxHostLatencyMs, float avgHostLatencyMs, boolean hasHostLatency,
-                          float decodeTimeMs) {
+                          float decodeTimeMs, int gamepadCount, int gamepadVibrationCount) {
         this.resolution = resolution;
         this.totalFps = totalFps;
         this.decoderName = decoderName;
@@ -51,11 +55,13 @@ public class StreamingStats {
         this.avgHostLatencyMs = avgHostLatencyMs;
         this.hasHostLatency = hasHostLatency;
         this.decodeTimeMs = decodeTimeMs;
+        this.gamepadCount = gamepadCount;
+        this.gamepadVibrationCount = gamepadVibrationCount;
     }
 
     /**
      * Get a simplified one-line summary for notification display.
-     * Format: "DecoderName | 1920x1080 60.0 FPS | RTT 5 ms | Dec 2.5 ms"
+     * Format: "DecoderName | 1920x1080 60.0 FPS | RTT 5 ms | Dec 2.5 ms | 🎮 2(1)"
      */
     public String toNotificationText(String videoCodec) {
         StringBuilder sb = new StringBuilder();
@@ -73,6 +79,14 @@ public class StreamingStats {
 
         // Decode time
         sb.append(" | Dec ").append(String.format("%.1f", decodeTimeMs)).append(" ms");
+
+        // Gamepad info: show count and vibration support
+        if (gamepadCount > 0) {
+            sb.append(" | 🎮 ").append(gamepadCount);
+            if (gamepadVibrationCount > 0) {
+                sb.append("(").append(gamepadVibrationCount).append("📳)");
+            }
+        }
 
         return sb.toString();
     }
@@ -118,6 +132,8 @@ public class StreamingStats {
         private float avgHostLatencyMs;
         private boolean hasHostLatency;
         private float decodeTimeMs;
+        private int gamepadCount;
+        private int gamepadVibrationCount;
 
         public Builder setResolution(int width, int height) {
             this.resolution = width + "x" + height;
@@ -163,13 +179,19 @@ public class StreamingStats {
             return this;
         }
 
+        public Builder setGamepadInfo(int gamepadCount, int gamepadVibrationCount) {
+            this.gamepadCount = gamepadCount;
+            this.gamepadVibrationCount = gamepadVibrationCount;
+            return this;
+        }
+
         public StreamingStats build() {
             return new StreamingStats(
                     resolution, totalFps, decoderName,
                     receivedFps, renderedFps,
                     networkDropPercentage, networkLatencyMs, networkLatencyVarianceMs,
                     minHostLatencyMs, maxHostLatencyMs, avgHostLatencyMs, hasHostLatency,
-                    decodeTimeMs
+                    decodeTimeMs, gamepadCount, gamepadVibrationCount
             );
         }
     }

@@ -104,7 +104,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         // Initialize extracted components
         this.capabilityChecker = new DecoderCapabilityChecker(prefs, requestedHdr, consecutiveCrashCount);
         this.csdProcessor = new CsdBufferProcessor();
-        this.statsManager = new PerformanceStatsManager(prefs, perfListener);
+        this.statsManager = new PerformanceStatsManager(activity, prefs, perfListener);
         this.recoveryManager = new CodecRecoveryManager(this);
     }
 

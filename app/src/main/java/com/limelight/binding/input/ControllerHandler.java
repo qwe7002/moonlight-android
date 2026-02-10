@@ -369,6 +369,60 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         return mask;
     }
 
+    public static class GamepadInfo {
+        public int totalCount;
+        public int vibrationSupportCount;
+
+        public GamepadInfo(int totalCount, int vibrationSupportCount) {
+            this.totalCount = totalCount;
+            this.vibrationSupportCount = vibrationSupportCount;
+        }
+    }
+
+    public static GamepadInfo getGamepadInfo(Context context) {
+        int totalCount = 0;
+        int vibrationCount = 0;
+
+        // Count all input devices that are gamepads
+        InputManager im = (InputManager) context.getSystemService(Context.INPUT_SERVICE);
+        for (int id : im.getInputDeviceIds()) {
+            InputDevice dev = im.getInputDevice(id);
+            if (dev == null) {
+                continue;
+            }
+
+            if (hasJoystickAxes(dev)) {
+                totalCount++;
+                // Check if this device has vibration support
+                if (dev.getVibratorManager() != null) {
+                    if (hasQuadAmplitudeControlledRumbleVibrators(dev.getVibratorManager()) ||
+                        hasDualAmplitudeControlledRumbleVibrators(dev.getVibratorManager())) {
+                        vibrationCount++;
+                    }
+                } else if (dev.getVibrator() != null && dev.getVibrator().hasVibrator()) {
+                    vibrationCount++;
+                }
+            }
+        }
+
+        // Count all USB devices that match our drivers
+        if (PreferenceConfiguration.readPreferences(context).usbDriver) {
+            UsbManager usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+            if (usbManager != null) {
+                for (UsbDevice dev : usbManager.getDeviceList().values()) {
+                    if (UsbDriverService.shouldClaimDevice(dev, false) &&
+                            !UsbDriverService.isRecognizedInputDevice(dev)) {
+                        totalCount++;
+                        // USB gamepads typically support vibration
+                        vibrationCount++;
+                    }
+                }
+            }
+        }
+
+        return new GamepadInfo(totalCount, vibrationCount);
+    }
+
     private void releaseControllerNumber(GenericControllerContext context) {
         // If we reserved a controller number, remove that reservation
         if (context.reservedControllerNumber) {
@@ -1785,7 +1839,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         }
     }
 
-    private boolean hasDualAmplitudeControlledRumbleVibrators(VibratorManager vm) {
+    private static boolean hasDualAmplitudeControlledRumbleVibrators(VibratorManager vm) {
         int[] vibratorIds = vm.getVibratorIds();
 
         // There must be exactly 2 vibrators on this device
@@ -1838,7 +1892,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         vm.vibrate(combo.combine(), vibrationAttributes.build());
     }
 
-    private boolean hasQuadAmplitudeControlledRumbleVibrators(VibratorManager vm) {
+    private static boolean hasQuadAmplitudeControlledRumbleVibrators(VibratorManager vm) {
         int[] vibratorIds = vm.getVibratorIds();
 
         // There must be exactly 4 vibrators on this device

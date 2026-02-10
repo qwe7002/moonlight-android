@@ -332,7 +332,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         findViewById(R.id.keyboardBtnEsc).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_ESCAPE));
         findViewById(R.id.keyboardBtnTab).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_TAB));
         findViewById(R.id.keyboardBtnDelete).setOnClickListener(v -> sendSpecialKeyWithModifiers(0x2e)); // VK_DELETE
-        findViewById(R.id.keyboardBtnTaskMgr).setOnClickListener(v -> sendCtrlShiftEsc());
         findViewById(R.id.specialKeysHide).setOnClickListener(v -> hideSpecialKeysBar());
 
         // Initialize keyboard input bar (shown with 4-finger tap)

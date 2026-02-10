@@ -176,27 +176,6 @@
                     android:text="@string/key_delete"
                     android:textSize="11sp" />
 
-
-                <Button
-                    android:id="@+id/keyboardBtnTaskMgr"
-                    style="?android:attr/buttonBarButtonStyle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:minWidth="56dp"
-                    android:text="@string/key_task_mgr"
-                    android:textSize="11sp"
-                    android:background="#804CAF50" />
-
-                <!-- Separator -->
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="match_parent"
-                    android:layout_marginStart="6dp"
-                    android:layout_marginLeft="6dp"
-                    android:layout_marginEnd="6dp"
-                    android:layout_marginRight="6dp"
-                    android:background="#60FFFFFF" />
-
                 <!-- Separator -->
                 <View
                     android:layout_width="1dp"

@@ -1,7 +1,9 @@
 package com.limelight.binding.video.decoder;
 
+import android.content.Context;
 import android.os.SystemClock;
 
+import com.limelight.binding.input.ControllerHandler;
 import com.limelight.binding.video.PerfOverlayListener;
 import com.limelight.binding.video.StreamingStats;
 import com.limelight.binding.video.VideoStats;
@@ -25,13 +27,15 @@ public class PerformanceStatsManager {
 
     private final PreferenceConfiguration prefs;
     private final PerfOverlayListener perfListener;
+    private final Context context;
 
     private int lastFrameNumber;
     private int initialWidth;
     private int initialHeight;
 
-    public PerformanceStatsManager(PreferenceConfiguration prefs,
+    public PerformanceStatsManager(Context context, PreferenceConfiguration prefs,
                                     PerfOverlayListener perfListener) {
+        this.context = context;
         this.prefs = prefs;
         this.perfListener = perfListener;
 
@@ -119,6 +123,9 @@ public class PerformanceStatsManager {
 
         long rttInfo = MoonBridge.getEstimatedRttInfo();
 
+        // Get gamepad connection info
+        ControllerHandler.GamepadInfo gamepadInfo = ControllerHandler.getGamepadInfo(context);
+
         return new StreamingStats.Builder()
                 .setResolution(initialWidth, initialHeight)
                 .setFps(lastTwo.getFps())
@@ -130,6 +137,7 @@ public class PerformanceStatsManager {
                         lastTwo.totalHostProcessingLatency,
                         lastTwo.framesWithHostProcessingLatency)
                 .setDecodeTimeMs(lastTwo.decoderTimeMs, lastTwo.totalFramesReceived)
+                .setGamepadInfo(gamepadInfo.totalCount, gamepadInfo.vibrationSupportCount)
                 .build();
     }
 
