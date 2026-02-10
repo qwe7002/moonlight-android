@@ -133,6 +133,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         setContentView(R.layout.activity_pc_view);
 
         UiHelper.notifyNewRootView(this);
+        UiHelper.applyStatusBarPadding(findViewById(android.R.id.content));
 
         // Allow floating expanded PiP overlays while browsing PCs
         setShouldDockBigOverlays(false);
@@ -853,7 +854,6 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                 }
             }
         });
-        UiHelper.applyStatusBarPadding(listView);
         registerForContextMenu(listView);
     }
 

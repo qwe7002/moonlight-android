@@ -129,23 +129,20 @@ public class AppView extends Activity implements AdapterFragmentCallbacks {
                     // Start updates
                     startComputerUpdates();
 
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (isFinishing() || isChangingConfigurations()) {
-                                return;
-                            }
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isChangingConfigurations()) {
+                            return;
+                        }
 
-                            // Despite my best efforts to catch all conditions that could
-                            // cause the activity to be destroyed when we try to commit
-                            // I haven't been able to, so we have this try-catch block.
-                            try {
-                                getFragmentManager().beginTransaction()
-                                        .replace(R.id.appFragmentContainer, new AdapterFragment())
-                                        .commitAllowingStateLoss();
-                            } catch (IllegalStateException e) {
-                                e.printStackTrace();
-                            }
+                        // Despite my best efforts to catch all conditions that could
+                        // cause the activity to be destroyed when we try to commit
+                        // I haven't been able to, so we have this try-catch block.
+                        try {
+                            getFragmentManager().beginTransaction()
+                                    .replace(R.id.appFragmentContainer, new AdapterFragment())
+                                    .commitAllowingStateLoss();
+                        } catch (IllegalStateException e) {
+                            e.printStackTrace();
                         }
                     });
                 }
@@ -294,11 +291,10 @@ public class AppView extends Activity implements AdapterFragmentCallbacks {
         setContentView(R.layout.activity_app_view);
 
         // Allow floating expanded PiP overlays while browsing apps
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            setShouldDockBigOverlays(false);
-        }
+        setShouldDockBigOverlays(false);
 
         UiHelper.notifyNewRootView(this);
+        UiHelper.applyStatusBarPadding(findViewById(android.R.id.content));
 
         showHiddenApps = getIntent().getBooleanExtra(SHOW_HIDDEN_APPS_EXTRA, false);
         uuidString = getIntent().getStringExtra(UUID_EXTRA);
@@ -640,7 +636,6 @@ public class AppView extends Activity implements AdapterFragmentCallbacks {
                 }
             }
         });
-        UiHelper.applyStatusBarPadding(listView);
         registerForContextMenu(listView);
         listView.requestFocus();
     }
