@@ -157,12 +157,7 @@ public class ServerHelper {
                 }
 
                 final String toastMessage = message;
-                parent.runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        Toast.makeText(parent, toastMessage, Toast.LENGTH_LONG).show();
-                    }
-                });
+                parent.runOnUiThread(() -> Toast.makeText(parent, toastMessage, Toast.LENGTH_LONG).show());
             }
         }).start();
     }

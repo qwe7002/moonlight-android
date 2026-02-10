@@ -5,11 +5,9 @@ import android.app.AlertDialog;
 import android.app.GameManager;
 import android.app.GameState;
 import android.app.LocaleManager;
-import android.app.UiModeManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
-import android.content.res.Configuration;
 import android.graphics.Insets;
 import android.os.LocaleList;
 import android.view.View;
@@ -23,45 +21,40 @@ import com.limelight.preferences.PreferenceConfiguration;
 
 public class UiHelper {
 
-    private static final int TV_VERTICAL_PADDING_DP = 15;
-    private static final int TV_HORIZONTAL_PADDING_DP = 15;
-
-    private static void setGameModeStatus(Context context, boolean streaming, boolean interruptible) {
+    private static void setGameModeStatus(Context context, boolean streaming) {
         GameManager gameManager = context.getSystemService(GameManager.class);
         if (gameManager == null) {
             return;
         }
 
         if (streaming) {
-            gameManager.setGameState(new GameState(false, interruptible ? GameState.MODE_GAMEPLAY_INTERRUPTIBLE : GameState.MODE_GAMEPLAY_UNINTERRUPTIBLE));
-        }
-        else {
+            gameManager.setGameState(new GameState(false, GameState.MODE_GAMEPLAY_UNINTERRUPTIBLE));
+        } else {
             gameManager.setGameState(new GameState(false, GameState.MODE_NONE));
         }
     }
 
     public static void notifyStreamConnecting(Context context) {
-        setGameModeStatus(context, true, true);
+        setGameModeStatus(context, true);
     }
 
     public static void notifyStreamConnected(Context context) {
-        setGameModeStatus(context, true, false);
+        setGameModeStatus(context, true);
     }
 
     public static void notifyStreamEnteringPiP(Context context) {
-        setGameModeStatus(context, true, true);
+        setGameModeStatus(context, true);
     }
 
     public static void notifyStreamExitingPiP(Context context) {
-        setGameModeStatus(context, true, false);
+        setGameModeStatus(context, true);
     }
 
     public static void notifyStreamEnded(Context context) {
-        setGameModeStatus(context, false, false);
+        setGameModeStatus(context, false);
     }
 
-    public static void setLocale(Activity activity)
-    {
+    public static void setLocale(Activity activity) {
         String locale = PreferenceConfiguration.readPreferences(activity).language;
         if (!locale.equals(PreferenceConfiguration.DEFAULT_LANGUAGE)) {
             // On Android 13, migrate this non-default language setting into the OS native API
@@ -110,13 +103,9 @@ public class UiHelper {
         }
     }
 
-    public static void notifyNewRootView(final Activity activity)
-    {
-        View rootView = activity.findViewById(android.R.id.content);
-        UiModeManager modeMgr = (UiModeManager) activity.getSystemService(Context.UI_MODE_SERVICE);
-
+    public static void notifyNewRootView(final Activity activity) {
         // Set GameState.MODE_NONE initially for all activities
-        setGameModeStatus(activity, false, false);
+        setGameModeStatus(activity, false);
 
         // Allow this non-streaming activity to layout under notches.
         //
@@ -126,25 +115,12 @@ public class UiHelper {
         activity.getWindow().getAttributes().layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
 
-        if (modeMgr.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION) {
-            // Increase view padding on TVs
-            float scale = activity.getResources().getDisplayMetrics().density;
-            int verticalPaddingPixels = (int) (TV_VERTICAL_PADDING_DP*scale + 0.5f);
-            int horizontalPaddingPixels = (int) (TV_HORIZONTAL_PADDING_DP*scale + 0.5f);
 
-            rootView.setPadding(horizontalPaddingPixels, verticalPaddingPixels,
-                    horizontalPaddingPixels, verticalPaddingPixels);
-        }
-        else {
-            // Handle Edge-to-Edge mode for non-TV devices
-            // On SDK 35+, Edge-to-Edge is enforced. Each view that needs padding
-            // should call applyStatusBarPadding() explicitly to avoid double-padding.
+        // Use the WindowInsetsController API
+        WindowInsetsController controller = activity.getWindow().getInsetsController();
+        if (controller != null) {
+            controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
 
-            // Use the WindowInsetsController API
-            WindowInsetsController controller = activity.getWindow().getInsetsController();
-            if (controller != null) {
-                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
         }
     }
 
@@ -163,24 +139,17 @@ public class UiHelper {
                 Dialog.displayDialog(activity,
                         activity.getResources().getString(R.string.title_decoding_reset),
                         activity.getResources().getString(R.string.message_decoding_reset),
-                        new Runnable() {
-                            @Override
-                            public void run() {
-                                // Mark notification as acknowledged on dismissal
-                                prefs.edit().putInt("LastNotifiedCrashCount", crashCount).apply();
-                            }
+                        () -> {
+                            // Mark notification as acknowledged on dismissal
+                            prefs.edit().putInt("LastNotifiedCrashCount", crashCount).apply();
                         });
-            }
-            else {
+            } else {
                 Dialog.displayDialog(activity,
                         activity.getResources().getString(R.string.title_decoding_error),
                         activity.getResources().getString(R.string.message_decoding_error),
-                        new Runnable() {
-                            @Override
-                            public void run() {
-                                // Mark notification as acknowledged on dismissal
-                                prefs.edit().putInt("LastNotifiedCrashCount", crashCount).apply();
-                            }
+                        () -> {
+                            // Mark notification as acknowledged on dismissal
+                            prefs.edit().putInt("LastNotifiedCrashCount", crashCount).apply();
                         });
             }
         }
@@ -190,7 +159,7 @@ public class UiHelper {
         DialogInterface.OnClickListener dialogClickListener = new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                switch (which){
+                switch (which) {
                     case DialogInterface.BUTTON_POSITIVE:
                         if (onYes != null) {
                             onYes.run();
@@ -217,7 +186,7 @@ public class UiHelper {
         DialogInterface.OnClickListener dialogClickListener = new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                switch (which){
+                switch (which) {
                     case DialogInterface.BUTTON_POSITIVE:
                         if (onYes != null) {
                             onYes.run();
