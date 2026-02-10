@@ -74,6 +74,7 @@ import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.ToggleButton;
 
 import java.io.ByteArrayInputStream;
 import java.lang.reflect.InvocationTargetException;
@@ -148,6 +149,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Keyboard input bar views
     private View keyboardInputBar;
     private android.widget.EditText keyboardInputText;
+
+    // Special keys bar views (shown with soft keyboard)
+    private View specialKeysBar;
+    private ToggleButton modifierCtrl, modifierAlt, modifierShift, modifierWin;
+    private boolean isSpecialKeysBarVisible = false;
 
     private MediaCodecDecoderRenderer decoderRenderer;
     private boolean reportedCrash;
@@ -267,9 +273,45 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         performanceOverlayView = findViewById(R.id.performanceOverlay);
 
-        // Initialize keyboard input bar
+        // Initialize special keys bar (shown with 3-finger tap)
+        specialKeysBar = findViewById(R.id.specialKeysBar);
+
+        // Initialize modifier toggle buttons
+        modifierCtrl = findViewById(R.id.keyboardBtnCtrl);
+        modifierAlt = findViewById(R.id.keyboardBtnAlt);
+        modifierShift = findViewById(R.id.keyboardBtnShift);
+        modifierWin = findViewById(R.id.keyboardBtnWin);
+
+        // Setup function key buttons (F1-F12)
+        findViewById(R.id.keyboardBtnF1).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1));
+        findViewById(R.id.keyboardBtnF2).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 1));
+        findViewById(R.id.keyboardBtnF3).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 2));
+        findViewById(R.id.keyboardBtnF4).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 3));
+        findViewById(R.id.keyboardBtnF5).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 4));
+        findViewById(R.id.keyboardBtnF6).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 5));
+        findViewById(R.id.keyboardBtnF7).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 6));
+        findViewById(R.id.keyboardBtnF8).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 7));
+        findViewById(R.id.keyboardBtnF9).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 8));
+        findViewById(R.id.keyboardBtnF10).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 9));
+        findViewById(R.id.keyboardBtnF11).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 10));
+        findViewById(R.id.keyboardBtnF12).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1 + 11));
+
+        // Setup other special keys
+        findViewById(R.id.keyboardBtnEsc).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_ESCAPE));
+        findViewById(R.id.keyboardBtnTab).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_TAB));
+        findViewById(R.id.keyboardBtnInsert).setOnClickListener(v -> sendSpecialKeyWithModifiers(0x2d)); // VK_INSERT
+        findViewById(R.id.keyboardBtnDelete).setOnClickListener(v -> sendSpecialKeyWithModifiers(0x2e)); // VK_DELETE
+        findViewById(R.id.keyboardBtnHome).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_HOME));
+        findViewById(R.id.keyboardBtnEnd).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_END));
+        findViewById(R.id.keyboardBtnPgUp).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_PAGE_UP));
+        findViewById(R.id.keyboardBtnPgDn).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_PAGE_DOWN));
+        findViewById(R.id.keyboardBtnPrtSc).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_PRINTSCREEN));
+        findViewById(R.id.specialKeysHide).setOnClickListener(v -> hideSpecialKeysBar());
+
+        // Initialize keyboard input bar (shown with 4-finger tap)
         keyboardInputBar = findViewById(R.id.keyboardInputBar);
         keyboardInputText = findViewById(R.id.keyboardInputText);
+
         findViewById(R.id.keyboardInputSend).setOnClickListener(v -> {
             String text = keyboardInputText.getText().toString();
             if (!text.isEmpty()) {
@@ -1389,9 +1431,43 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void toggleKeyboard() {
-        LimeLog.info("Toggling keyboard overlay");
-        InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        inputManager.toggleSoftInput(0, 0);
+        LimeLog.info("Toggling keyboard overlay with special keys bar");
+        runOnUiThread(() -> {
+            if (isSpecialKeysBarVisible) {
+                // Hide special keys bar and keyboard
+                hideSpecialKeysBar();
+            } else {
+                // Show special keys bar and keyboard
+                specialKeysBar.setVisibility(View.VISIBLE);
+                isSpecialKeysBarVisible = true;
+                // Reset modifier states
+                if (modifierCtrl != null) modifierCtrl.setChecked(false);
+                if (modifierAlt != null) modifierAlt.setChecked(false);
+                if (modifierShift != null) modifierShift.setChecked(false);
+                if (modifierWin != null) modifierWin.setChecked(false);
+                // Show soft keyboard
+                streamView.requestFocus();
+                InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                inputManager.showSoftInput(streamView, InputMethodManager.SHOW_IMPLICIT);
+            }
+        });
+    }
+
+    private void hideSpecialKeysBar() {
+        runOnUiThread(() -> {
+            specialKeysBar.setVisibility(View.GONE);
+            isSpecialKeysBarVisible = false;
+            // Reset modifier states
+            if (modifierCtrl != null) modifierCtrl.setChecked(false);
+            if (modifierAlt != null) modifierAlt.setChecked(false);
+            if (modifierShift != null) modifierShift.setChecked(false);
+            if (modifierWin != null) modifierWin.setChecked(false);
+            // Hide soft keyboard
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(streamView.getWindowToken(), 0);
+            // Restore focus to the stream view
+            streamView.requestFocus();
+        });
     }
 
     private void showKeyboardWithInput() {
@@ -1433,6 +1509,33 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private void sendEnterKeyDelayed() {
         // Delay sending Enter key to ensure text is processed first
         streamView.postDelayed(this::sendEnterKey, 500);
+    }
+
+    private void sendSpecialKeyWithModifiers(int vkCode) {
+        // Get modifier state from toggle buttons
+        byte modifiers = 0;
+        if (modifierCtrl != null && modifierCtrl.isChecked()) {
+            modifiers |= KeyboardPacket.MODIFIER_CTRL;
+        }
+        if (modifierAlt != null && modifierAlt.isChecked()) {
+            modifiers |= KeyboardPacket.MODIFIER_ALT;
+        }
+        if (modifierShift != null && modifierShift.isChecked()) {
+            modifiers |= KeyboardPacket.MODIFIER_SHIFT;
+        }
+        if (modifierWin != null && modifierWin.isChecked()) {
+            modifiers |= KeyboardPacket.MODIFIER_META;
+        }
+
+        short keyCode = (short) (0x80 << 8 | vkCode);
+        conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_DOWN, modifiers, (byte) 0);
+        conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_UP, modifiers, (byte) 0);
+
+        // Reset modifier toggle buttons after sending
+        if (modifierCtrl != null) modifierCtrl.setChecked(false);
+        if (modifierAlt != null) modifierAlt.setChecked(false);
+        if (modifierShift != null) modifierShift.setChecked(false);
+        if (modifierWin != null) modifierWin.setChecked(false);
     }
 
     private byte getLiTouchTypeFromEvent(MotionEvent event) {
@@ -2004,15 +2107,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 case MotionEvent.ACTION_UP:
                     if (event.getPointerCount() == 1 && (event.getFlags() & MotionEvent.FLAG_CANCELED) == 0) {
                         // All fingers up
-                        // Check for 4 finger tap first (keyboard with input)
+                        // Check for 4 finger tap first (keyboard with input dialog)
                         if (event.getEventTime() - fourFingerDownTime < FOUR_FINGER_TAP_THRESHOLD) {
                             // This is a 4 finger tap to bring up keyboard with input dialog
                             showKeyboardWithInput();
                             return true;
                         }
-                        // Check for 3 finger tap (toggle keyboard)
+                        // Check for 3 finger tap (toggle keyboard with special keys bar)
                         if (event.getEventTime() - threeFingerDownTime < THREE_FINGER_TAP_THRESHOLD) {
-                            // This is a 3 finger tap to bring up the keyboard
+                            // This is a 3 finger tap to bring up the keyboard with special keys
                             toggleKeyboard();
                             return true;
                         }

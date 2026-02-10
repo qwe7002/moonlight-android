@@ -50,7 +50,296 @@
         android:preferKeepClear="true"
         android:visibility="gone" />
 
-    <!-- Bottom keyboard input bar -->
+    <!-- Special keys bar (shown with 3-finger tap above soft keyboard) -->
+    <LinearLayout
+        android:id="@+id/specialKeysBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:background="#E0303030"
+        android:visibility="gone"
+        android:elevation="8dp">
+
+        <!-- Function keys row (scrollable) -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:layout_marginBottom="4dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/keyboardBtnEsc"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_esc"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF1"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f1"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF2"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f2"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF3"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f3"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF4"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f4"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF5"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f5"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF6"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f6"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF7"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f7"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF8"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f8"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF9"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f9"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF10"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f10"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF11"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f11"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnF12"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_f12"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnInsert"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_insert"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnDelete"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_delete"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnHome"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_home"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnEnd"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_end"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnPgUp"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_pgup"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnPgDn"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="48dp"
+                    android:text="@string/key_pgdn"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- Modifier keys row -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <ToggleButton
+                    android:id="@+id/keyboardBtnCtrl"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="56dp"
+                    android:textOn="@string/key_ctrl"
+                    android:textOff="@string/key_ctrl"
+                    android:textSize="12sp" />
+
+                <ToggleButton
+                    android:id="@+id/keyboardBtnAlt"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="56dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginLeft="4dp"
+                    android:textOn="@string/key_alt"
+                    android:textOff="@string/key_alt"
+                    android:textSize="12sp" />
+
+                <ToggleButton
+                    android:id="@+id/keyboardBtnShift"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="56dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginLeft="4dp"
+                    android:textOn="@string/key_shift"
+                    android:textOff="@string/key_shift"
+                    android:textSize="12sp" />
+
+                <ToggleButton
+                    android:id="@+id/keyboardBtnWin"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="56dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginLeft="4dp"
+                    android:textOn="@string/key_win"
+                    android:textOff="@string/key_win"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnTab"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="56dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginLeft="4dp"
+                    android:text="@string/key_tab"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/keyboardBtnPrtSc"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="56dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginLeft="4dp"
+                    android:text="@string/key_prtsc"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/specialKeysHide"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:minWidth="56dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginLeft="8dp"
+                    android:text="@string/key_hide"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+        </HorizontalScrollView>
+
+    </LinearLayout>
+
+    <!-- Bottom keyboard input bar (shown with 4-finger tap) -->
     <LinearLayout
         android:id="@+id/keyboardInputBar"
         android:layout_width="match_parent"
@@ -103,6 +392,7 @@
             android:layout_marginLeft="4dp"
             android:text="@android:string/cancel"
             android:minWidth="80dp" />
+
 
     </LinearLayout>
 
