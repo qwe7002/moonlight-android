@@ -944,15 +944,21 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         // Only apply new window layout parameters if we've actually changed the display mode
         if (display.getMode().getModeId() != bestMode.getModeId()) {
-            // If we only changed refresh rate and we're on an OS that supports Surface.setFrameRate()
-            // use that instead of using preferredDisplayModeId to avoid the possibility of triggering
-            // bugs that can cause the system to switch from 4K60 to 4K24 on Chromecast 4K.
-            if (display.getMode().getPhysicalWidth() != bestMode.getPhysicalWidth() || display.getMode().getPhysicalHeight() != bestMode.getPhysicalHeight()) {
-                // Apply the display mode change
+            // Check if resolution change is needed
+            boolean needsResolutionChange = display.getMode().getPhysicalWidth() != bestMode.getPhysicalWidth() ||
+                    display.getMode().getPhysicalHeight() != bestMode.getPhysicalHeight();
+
+            if (needsResolutionChange) {
+                // For resolution changes, we need to use preferredDisplayModeId
                 windowLayoutParams.preferredDisplayModeId = bestMode.getModeId();
                 getWindow().setAttributes(windowLayoutParams);
+                LimeLog.info("Applied display mode change via preferredDisplayModeId");
             } else {
-                LimeLog.info("Using setFrameRate() instead of preferredDisplayModeId due to matching resolution");
+                // For refresh rate only changes, use the modern preferredRefreshRate API
+                // This is more reliable and avoids bugs with preferredDisplayModeId on some devices
+                windowLayoutParams.preferredRefreshRate = bestMode.getRefreshRate();
+                getWindow().setAttributes(windowLayoutParams);
+                LimeLog.info("Applied refresh rate change via preferredRefreshRate: " + bestMode.getRefreshRate() + " Hz");
             }
         } else {
             LimeLog.info("Current display mode is already the best display mode");
@@ -2742,11 +2748,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         // Tell the OS about our frame rate to allow it to adapt the display refresh rate appropriately
         // We want to change frame rate even if it's not seamless, since prepareDisplayForRendering()
-        // will not set the display mode on S+ if it only differs by the refresh rate. It depends
+        // will not set the display mode if it only differs by the refresh rate. It depends
         // on us to trigger the frame rate switch here.
         holder.getSurface().setFrameRate(desiredFrameRate,
                 Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
                 Surface.CHANGE_FRAME_RATE_ALWAYS);
+
+        LimeLog.info("Set surface frame rate to " + desiredFrameRate + " Hz");
     }
 
     @Override
