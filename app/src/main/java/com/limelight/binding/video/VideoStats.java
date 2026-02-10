@@ -2,22 +2,22 @@ package com.limelight.binding.video;
 
 import android.os.SystemClock;
 
-class VideoStats {
+public class VideoStats {
 
-    long decoderTimeMs;
-    long totalTimeMs;
-    int totalFrames;
-    int totalFramesReceived;
-    int totalFramesRendered;
-    int frameLossEvents;
-    int framesLost;
-    char minHostProcessingLatency;
-    char maxHostProcessingLatency;
-    int totalHostProcessingLatency;
-    int framesWithHostProcessingLatency;
-    long measurementStartTimestamp;
+    public long decoderTimeMs;
+    public long totalTimeMs;
+    public int totalFrames;
+    public int totalFramesReceived;
+    public int totalFramesRendered;
+    public int frameLossEvents;
+    public int framesLost;
+    public char minHostProcessingLatency;
+    public char maxHostProcessingLatency;
+    public int totalHostProcessingLatency;
+    public int framesWithHostProcessingLatency;
+    public long measurementStartTimestamp;
 
-    void add(VideoStats other) {
+    public void add(VideoStats other) {
         this.decoderTimeMs += other.decoderTimeMs;
         this.totalTimeMs += other.totalTimeMs;
         this.totalFrames += other.totalFrames;
@@ -42,7 +42,7 @@ class VideoStats {
         assert other.measurementStartTimestamp >= this.measurementStartTimestamp;
     }
 
-    void copy(VideoStats other) {
+    public void copy(VideoStats other) {
         this.decoderTimeMs = other.decoderTimeMs;
         this.totalTimeMs = other.totalTimeMs;
         this.totalFrames = other.totalFrames;
@@ -57,7 +57,7 @@ class VideoStats {
         this.measurementStartTimestamp = other.measurementStartTimestamp;
     }
 
-    void clear() {
+    public void clear() {
         this.decoderTimeMs = 0;
         this.totalTimeMs = 0;
         this.totalFrames = 0;
@@ -72,10 +72,10 @@ class VideoStats {
         this.measurementStartTimestamp = 0;
     }
 
-    VideoStatsFps getFps() {
+    public Fps getFps() {
         float elapsed = (SystemClock.uptimeMillis() - this.measurementStartTimestamp) / (float) 1000;
 
-        VideoStatsFps fps = new VideoStatsFps();
+        Fps fps = new Fps();
         if (elapsed > 0) {
             fps.totalFps = this.totalFrames / elapsed;
             fps.receivedFps = this.totalFramesReceived / elapsed;
@@ -83,11 +83,13 @@ class VideoStats {
         }
         return fps;
     }
-}
 
-class VideoStatsFps {
-
-    float totalFps;
-    float receivedFps;
-    float renderedFps;
+    /**
+     * Frame rate statistics for video performance monitoring.
+     */
+    public static class Fps {
+        public float totalFps;
+        public float receivedFps;
+        public float renderedFps;
+    }
 }
