@@ -13,9 +13,7 @@ import com.limelight.grid.assets.DiskAssetLoader;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.NvHTTP;
-import com.limelight.nvstream.http.PairingManager;
 import com.limelight.nvstream.http.PairingManager.PairState;
-import com.limelight.nvstream.wol.WakeOnLanSender;
 import com.limelight.preferences.GlPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.preferences.StreamSettings;
@@ -119,7 +117,6 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
 
     private final static int PAIR_ID = 2;
     private final static int UNPAIR_ID = 3;
-    private final static int WOL_ID = 4;
     private final static int DELETE_ID = 5;
     private final static int RESUME_ID = 6;
     private final static int QUIT_ID = 7;
@@ -370,10 +367,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         menu.setHeaderTitle(headerTitle);
 
         // Inflate the context menu
-        if (computer.details.state == ComputerDetails.State.OFFLINE ||
-                computer.details.state == ComputerDetails.State.UNKNOWN) {
-            menu.add(Menu.NONE, WOL_ID, 1, getResources().getString(R.string.pcview_menu_send_wol));
-        } else if (computer.details.pairState != PairState.PAIRED) {
+        if (computer.details.pairState != PairState.PAIRED) {
             menu.add(Menu.NONE, PAIR_ID, 1, getResources().getString(R.string.pcview_menu_pair_pc));
         } else {
             if (computer.details.runningGameId != 0) {
@@ -563,39 +557,6 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         startForegroundService(pairingIntent);
     }
 
-    private void doWakeOnLan(final ComputerDetails computer) {
-        if (computer.state == ComputerDetails.State.ONLINE) {
-            Toast.makeText(PcView.this, getResources().getString(R.string.wol_pc_online), Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        if (computer.macAddress == null) {
-            Toast.makeText(PcView.this, getResources().getString(R.string.wol_no_mac), Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                String message;
-                try {
-                    WakeOnLanSender.sendWolPacket(computer);
-                    message = getResources().getString(R.string.wol_waking_msg);
-                } catch (IOException e) {
-                    message = getResources().getString(R.string.wol_fail);
-                }
-
-                final String toastMessage = message;
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        Toast.makeText(PcView.this, toastMessage, Toast.LENGTH_LONG).show();
-                    }
-                });
-            }
-        }).start();
-    }
-
     private void doUnpair(final ComputerDetails computer) {
         if (computer.state == ComputerDetails.State.OFFLINE || computer.activeAddress == null) {
             Toast.makeText(PcView.this, getResources().getString(R.string.error_pc_offline), Toast.LENGTH_SHORT).show();
@@ -607,38 +568,35 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         }
 
         Toast.makeText(PcView.this, getResources().getString(R.string.unpairing), Toast.LENGTH_SHORT).show();
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                NvHTTP httpConn;
-                String message;
-                try {
-                    httpConn = new NvHTTP(ServerHelper.getCurrentAddressFromComputer(computer),
-                            computer.httpsPort, managerBinder.getUniqueId(), computer.serverCert,
-                            PlatformBinding.getCryptoProvider(PcView.this));
-                    if (httpConn.getPairState() == PairState.PAIRED) {
-                        httpConn.unpair();
-                        if (httpConn.getPairState() == PairState.NOT_PAIRED) {
-                            message = getResources().getString(R.string.unpair_success);
-                        } else {
-                            message = getResources().getString(R.string.unpair_fail);
-                        }
+        new Thread(() -> {
+            NvHTTP httpConn;
+            String message;
+            try {
+                httpConn = new NvHTTP(ServerHelper.getCurrentAddressFromComputer(computer),
+                        computer.httpsPort, managerBinder.getUniqueId(), computer.serverCert,
+                        PlatformBinding.getCryptoProvider(PcView.this));
+                if (httpConn.getPairState() == PairState.PAIRED) {
+                    httpConn.unpair();
+                    if (httpConn.getPairState() == PairState.NOT_PAIRED) {
+                        message = getResources().getString(R.string.unpair_success);
                     } else {
-                        message = getResources().getString(R.string.unpair_error);
+                        message = getResources().getString(R.string.unpair_fail);
                     }
-                } catch (UnknownHostException e) {
-                    message = getResources().getString(R.string.error_unknown_host);
-                } catch (FileNotFoundException e) {
-                    message = getResources().getString(R.string.error_404);
-                } catch (XmlPullParserException | IOException e) {
-                    message = e.getMessage();
-                    Log.e(TAG, "run: " + e.getMessage(), e);
-
+                } else {
+                    message = getResources().getString(R.string.unpair_error);
                 }
+            } catch (UnknownHostException e) {
+                message = getResources().getString(R.string.error_unknown_host);
+            } catch (FileNotFoundException e) {
+                message = getResources().getString(R.string.error_404);
+            } catch (XmlPullParserException | IOException e) {
+                message = e.getMessage();
+                Log.e(TAG, "run: " + e.getMessage(), e);
 
-                final String toastMessage = message;
-                runOnUiThread(() -> Toast.makeText(PcView.this, toastMessage, Toast.LENGTH_LONG).show());
             }
+
+            final String toastMessage = message;
+            runOnUiThread(() -> Toast.makeText(PcView.this, toastMessage, Toast.LENGTH_LONG).show());
         }).start();
     }
 
@@ -671,10 +629,6 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
 
             case UNPAIR_ID:
                 doUnpair(computer.details);
-                return true;
-
-            case WOL_ID:
-                doWakeOnLan(computer.details);
                 return true;
 
             case DELETE_ID:
