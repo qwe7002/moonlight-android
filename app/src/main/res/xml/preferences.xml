@@ -10,7 +10,7 @@
             android:summary="@string/summary_resolution_list"
             android:entries="@array/resolution_names"
             android:entryValues="@array/resolution_values"
-            android:defaultValue="1280x720" />
+            android:defaultValue="1920x1080" />
         <ListPreference
             android:key="list_fps"
             android:title="@string/title_fps_list"
@@ -59,7 +59,7 @@
         android:key="category_gamepad_settings">
         <com.limelight.preferences.SeekBarPreference
             android:key="seekbar_deadzone"
-            android:defaultValue="7"
+            android:defaultValue="1"
             android:max="20"
             android:summary="@string/summary_seekbar_deadzone"
             android:text="@string/suffix_seekbar_deadzone"
@@ -79,7 +79,7 @@
             android:dependency="checkbox_usb_driver"
             android:title="@string/title_checkbox_usb_bind_all"
             android:summary="@string/summary_checkbox_usb_bind_all"
-            android:defaultValue="false" />
+            android:defaultValue="true" />
         <CheckBoxPreference
             android:key="checkbox_mouse_emulation"
             android:title="@string/title_checkbox_mouse_emulation"
@@ -97,7 +97,7 @@
             android:key="checkbox_vibrate_fallback"
             android:title="@string/title_checkbox_vibrate_fallback"
             android:summary="@string/summary_checkbox_vibrate_fallback"
-            android:defaultValue="false" />
+            android:defaultValue="true" />
         <com.limelight.preferences.SeekBarPreference
             android:key="seekbar_vibrate_fallback_strength"
             android:dependency="checkbox_vibrate_fallback"
@@ -212,13 +212,6 @@
             android:title="@string/title_checkbox_enable_pip"
             android:summary="@string/summary_checkbox_enable_pip"
             android:defaultValue="false" />
-        <com.limelight.preferences.LanguagePreference
-            android:key="list_languages"
-            android:title="@string/title_language_list"
-            android:entries="@array/language_names"
-            android:entryValues="@array/language_values"
-            android:summary="@string/summary_language_list"
-            android:defaultValue="default" />
         <com.limelight.preferences.SmallIconCheckboxPreference
             android:key="checkbox_small_icon_mode"
             android:title="@string/title_checkbox_small_icon_mode"
@@ -267,7 +260,7 @@
             android:key="checkbox_enable_stats_notification"
             android:title="@string/title_enable_stats_notification"
             android:summary="@string/summary_enable_stats_notification"
-            android:defaultValue="false"/>
+            android:defaultValue="true"/>
         <CheckBoxPreference
             android:key="checkbox_enable_post_stream_toast"
             android:title="@string/title_enable_post_stream_toast"
@@ -277,7 +270,7 @@
             android:key="checkbox_enable_mdns"
             android:title="@string/title_checkbox_enable_mdns"
             android:summary="@string/summary_checkbox_enable_mdns"
-            android:defaultValue="true"/>
+            android:defaultValue="false"/>
     </PreferenceCategory>
     <!--PreferenceCategory android:title="@string/category_help"
         android:key="category_help">
