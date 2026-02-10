@@ -2,9 +2,7 @@ package com.limelight.preferences;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.os.Build;
-import android.preference.PreferenceManager;
 import android.view.Display;
 
 import com.limelight.nvstream.jni.MoonBridge;
@@ -118,8 +116,6 @@ public class PreferenceConfiguration {
     public static final int FRAME_PACING_CAP_FPS = 2;
     public static final int FRAME_PACING_MAX_SMOOTHNESS = 3;
 
-    public static final String RES_360P = "640x360";
-    public static final String RES_480P = "854x480";
     public static final String RES_720P = "1280x720";
     public static final String RES_1080P = "1920x1080";
     public static final String RES_1440P = "2560x1440";
@@ -202,13 +198,7 @@ public class PreferenceConfiguration {
     }
 
     private static String convertFromLegacyResolutionString(String resString) {
-        if (resString.equalsIgnoreCase("360p")) {
-            return RES_360P;
-        }
-        else if (resString.equalsIgnoreCase("480p")) {
-            return RES_480P;
-        }
-        else if (resString.equalsIgnoreCase("720p")) {
+        if (resString.equalsIgnoreCase("720p")) {
             return RES_720P;
         }
         else if (resString.equalsIgnoreCase("1080p")) {
@@ -311,32 +301,21 @@ public class PreferenceConfiguration {
     }
 
     public static boolean getDefaultSmallMode(Context context) {
-        PackageManager manager = context.getPackageManager();
-        if (manager != null) {
-            // TVs shouldn't use small mode by default
-            if (manager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)) {
-                return false;
-            }
-
-            // API 21 uses LEANBACK instead of TELEVISION
-            if (manager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) {
-                return false;
-            }
-        }
-
         // Use small mode on anything smaller than a 7" tablet
         return context.getResources().getConfiguration().smallestScreenWidthDp < 500;
     }
 
+    @SuppressWarnings("deprecation")
     public static int getDefaultBitrate(Context context) {
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
         return getDefaultBitrate(
                 prefs.getString(RESOLUTION_PREF_STRING, DEFAULT_RESOLUTION),
                 prefs.getString(FPS_PREF_STRING, DEFAULT_FPS));
     }
 
+    @SuppressWarnings("deprecation")
     private static FormatOption getVideoFormatValue(Context context) {
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
 
         String str = prefs.getString(VIDEO_FORMAT_PREF_STRING, DEFAULT_VIDEO_FORMAT);
         switch (str) {
@@ -355,7 +334,7 @@ public class PreferenceConfiguration {
     }
 
     private static int getFramePacingValue(Context context) {
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
 
         // Migrate legacy never drop frames option to the new location
         if (prefs.contains(LEGACY_DISABLE_FRAME_DROP_PREF_STRING)) {
@@ -383,7 +362,7 @@ public class PreferenceConfiguration {
     }
 
     private static AnalogStickForScrolling getAnalogStickForScrollingValue(Context context) {
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
 
         String str = prefs.getString(ANALOG_SCROLLING_PREF_STRING, DEFAULT_ANALOG_STICK_FOR_SCROLLING);
         if (str.equals("right")) {
@@ -399,7 +378,7 @@ public class PreferenceConfiguration {
 
     public static void resetStreamingSettings(Context context) {
         // We consider resolution, FPS, bitrate, HDR, and video format as "streaming settings" here
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
         prefs.edit()
                 .remove(BITRATE_PREF_STRING)
                 .remove(BITRATE_PREF_OLD_STRING)
@@ -415,7 +394,7 @@ public class PreferenceConfiguration {
 
     public static void completeLanguagePreferenceMigration(Context context) {
         // Put our language option back to default which tells us that we've already migrated it
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
         prefs.edit().putString(LANGUAGE_PREF_STRING, DEFAULT_LANGUAGE).apply();
     }
 
@@ -427,12 +406,12 @@ public class PreferenceConfiguration {
     }
 
     public static boolean isMdnsEnabled(Context context) {
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
         return prefs.getBoolean(ENABLE_MDNS_PREF_STRING, DEFAULT_ENABLE_MDNS);
     }
 
     public static PreferenceConfiguration readPreferences(Context context) {
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
         PreferenceConfiguration config = new PreferenceConfiguration();
 
         // Migrate legacy preferences to the new locations

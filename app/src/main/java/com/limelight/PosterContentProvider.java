@@ -32,6 +32,7 @@ public class PosterContentProvider extends ContentProvider {
         sUriMatcher.addURI(AUTHORITY, BOXART_PATH, BOXART_URI_ID);
     }
 
+    @SuppressWarnings("NullableProblems")
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         int match = sUriMatcher.match(uri);
@@ -60,33 +61,39 @@ public class PosterContentProvider extends ContentProvider {
         throw new FileNotFoundException();
     }
 
+    @SuppressWarnings("NullableProblems")
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         throw new UnsupportedOperationException("This provider is only for read mode");
     }
 
+    @SuppressWarnings("NullableProblems")
     @Override
     public String getType(Uri uri) {
         return PNG_MIME_TYPE;
     }
 
+    @SuppressWarnings("NullableProblems")
     @Override
     public Uri insert(Uri uri, ContentValues values) {
         throw new UnsupportedOperationException("This provider is only for read mode");
     }
 
+    @SuppressWarnings("DataFlowIssue")
     @Override
     public boolean onCreate() {
         mDiskAssetLoader = new DiskAssetLoader(getContext());
         return true;
     }
 
+    @SuppressWarnings("NullableProblems")
     @Override
     public Cursor query(Uri uri, String[] projection, String selection,
                         String[] selectionArgs, String sortOrder) {
         throw new UnsupportedOperationException("This provider doesn't support query");
     }
 
+    @SuppressWarnings("NullableProblems")
     @Override
     public int update(Uri uri, ContentValues values, String selection,
                       String[] selectionArgs) {

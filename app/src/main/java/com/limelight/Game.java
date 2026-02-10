@@ -25,7 +25,7 @@ import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.nvstream.input.KeyboardPacket;
 import com.limelight.nvstream.input.MouseButtonPacket;
 import com.limelight.nvstream.jni.MoonBridge;
-import com.limelight.preferences.GlPreferences;
+import com.limelight.preferences.VulkanPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
@@ -229,7 +229,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         setContentView(R.layout.activity_game);
 
         // Register back gesture callback for Android 13+
-        onBackInvokedCallback = () -> showBackMenu();
+        onBackInvokedCallback = this::showBackMenu;
         getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                 OnBackInvokedDispatcher.PRIORITY_DEFAULT,
                 onBackInvokedCallback
@@ -415,8 +415,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
 
         // Initialize the MediaCodec helper before creating the decoder
-        GlPreferences glPrefs = GlPreferences.readPreferences(this);
-        MediaCodecHelper.initialize(this, glPrefs.glRenderer);
+        VulkanPreferences glPrefs = VulkanPreferences.readPreferences(this);
+        MediaCodecHelper.initialize(this, glPrefs.VulkanRenderer);
 
         // Check if the user has enabled HDR
         boolean willStreamHdr = false;
@@ -465,7 +465,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 },
                 tombstonePrefs.getInt("CrashCount", 0),
                 willStreamHdr,
-                glPrefs.glRenderer,
+                glPrefs.VulkanRenderer,
                 this);
 
         // Don't stream HDR if the decoder can't support it

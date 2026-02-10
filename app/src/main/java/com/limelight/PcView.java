@@ -3,6 +3,7 @@ package com.limelight;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.UnknownHostException;
+import java.util.Objects;
 
 import com.limelight.binding.PlatformBinding;
 import com.limelight.binding.crypto.AndroidCryptoProvider;
@@ -14,7 +15,7 @@ import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.nvstream.http.PairingManager.PairState;
-import com.limelight.preferences.GlPreferences;
+import com.limelight.preferences.VulkanPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.preferences.StreamSettings;
 import com.limelight.ui.AdapterFragment;
@@ -33,18 +34,15 @@ import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.Manifest;
-import android.opengl.GLSurfaceView;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
-import android.preference.PreferenceManager;
 import android.util.Log;
 import android.view.ContextMenu;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ContextMenu.ContextMenuInfo;
-import android.view.View.OnClickListener;
 import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemClickListener;
@@ -57,8 +55,7 @@ import android.widget.AdapterView.AdapterContextMenuInfo;
 
 import org.xmlpull.v1.XmlPullParserException;
 
-import javax.microedition.khronos.egl.EGLConfig;
-import javax.microedition.khronos.opengles.GL10;
+import com.limelight.utils.VulkanHelper;
 
 @SuppressWarnings({"NullableProblems", "deprecation"})
 public class PcView extends Activity implements AdapterFragmentCallbacks {
@@ -77,22 +74,19 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
                     ((ComputerManagerService.ComputerManagerBinder) binder);
 
             // Wait in a separate thread to avoid stalling the UI
-            new Thread() {
-                @Override
-                public void run() {
-                    // Wait for the binder to be ready
-                    localBinder.waitForReady();
+            new Thread(() -> {
+                // Wait for the binder to be ready
+                localBinder.waitForReady();
 
-                    // Now make the binder visible
-                    managerBinder = localBinder;
+                // Now make the binder visible
+                managerBinder = localBinder;
 
-                    // Start updates
-                    startComputerUpdates();
+                // Start updates
+                startComputerUpdates();
 
-                    // Force a keypair to be generated early to avoid discovery delays
-                    new AndroidCryptoProvider(PcView.this).getClientCertificate();
-                }
-            }.start();
+                // Force a keypair to be generated early to avoid discovery delays
+                new AndroidCryptoProvider(PcView.this).getClientCertificate();
+            }).start();
         }
 
         public void onServiceDisconnected(ComponentName className) {
@@ -133,8 +127,6 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         // Allow floating expanded PiP overlays while browsing PCs
         setShouldDockBigOverlays(false);
 
-        // Set default preferences if we've never been run
-        PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
 
         // Set the correct layout for the PC grid
         PreferenceConfiguration prefConfig = PreferenceConfiguration.readPreferences(this);
@@ -145,31 +137,9 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         ImageButton addComputerButton = findViewById(R.id.manuallyAddPc);
         ImageButton helpButton = findViewById(R.id.helpButton);
 
-        settingsButton.setOnClickListener(new OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                startActivity(new Intent(PcView.this, StreamSettings.class));
-            }
-        });
-        addComputerButton.setOnClickListener(new OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showAddComputerDialog();
-            }
-        });
-        helpButton.setOnClickListener(new OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                HelpLauncher.launchSetupGuide(PcView.this);
-            }
-        });
-
-        // Amazon review didn't like the help button because the wiki was not entirely
-        // navigable via the Fire TV remote (though the relevant parts were). Let's hide
-        // it on Fire TV.
-        if (getPackageManager().hasSystemFeature("amazon.hardware.fire_tv")) {
-            helpButton.setVisibility(View.GONE);
-        }
+        settingsButton.setOnClickListener(v -> startActivity(new Intent(PcView.this, StreamSettings.class)));
+        addComputerButton.setOnClickListener(v -> showAddComputerDialog());
+        helpButton.setOnClickListener(v -> HelpLauncher.launchSetupGuide(PcView.this));
 
         getFragmentManager().beginTransaction()
                 .replace(R.id.pcFragmentContainer, new AdapterFragment())
@@ -206,42 +176,20 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
         // between binding to CMS and onResume()
         inForeground = true;
 
-        // Create a GLSurfaceView to fetch GLRenderer unless we have
-        // a cached result already.
-        final GlPreferences glPrefs = GlPreferences.readPreferences(this);
-        if (!glPrefs.savedFingerprint.equals(Build.FINGERPRINT) || glPrefs.glRenderer.isEmpty()) {
-            GLSurfaceView surfaceView = new GLSurfaceView(this);
-            surfaceView.setRenderer(new GLSurfaceView.Renderer() {
-                @Override
-                public void onSurfaceCreated(GL10 gl10, EGLConfig eglConfig) {
-                    // Save the GLRenderer string so we don't need to do this next time
-                    glPrefs.glRenderer = gl10.glGetString(GL10.GL_RENDERER);
-                    glPrefs.savedFingerprint = Build.FINGERPRINT;
-                    glPrefs.writePreferences();
-
-                    LimeLog.info("Fetched GL Renderer: " + glPrefs.glRenderer);
-
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            completeOnCreate();
-                        }
-                    });
-                }
-
-                @Override
-                public void onSurfaceChanged(GL10 gl10, int i, int i1) {
-                }
-
-                @Override
-                public void onDrawFrame(GL10 gl10) {
-                }
-            });
-            setContentView(surfaceView);
+        // Get GPU renderer info using Vulkan instead of OpenGL ES
+        final VulkanPreferences vulkanPreferences = VulkanPreferences.readPreferences(this);
+        if (!vulkanPreferences.savedFingerprint.equals(Build.FINGERPRINT) || vulkanPreferences.VulkanRenderer.isEmpty()) {
+            // Use Vulkan to detect GPU renderer
+            String gpuRenderer = VulkanHelper.getGpuRenderer(this);
+            vulkanPreferences.VulkanRenderer = gpuRenderer;
+            vulkanPreferences.savedFingerprint = Build.FINGERPRINT;
+            vulkanPreferences.writePreferences();
+            LimeLog.info("Fetched GPU Renderer via Vulkan: " + gpuRenderer);
         } else {
-            LimeLog.info("Cached GL Renderer: " + glPrefs.glRenderer);
-            completeOnCreate();
+            LimeLog.info("Cached GPU Renderer: " + vulkanPreferences.VulkanRenderer);
         }
+
+        completeOnCreate();
     }
 
     private void completeOnCreate() {
@@ -621,7 +569,7 @@ public class PcView extends Activity implements AdapterFragmentCallbacks {
     @Override
     public boolean onContextItemSelected(MenuItem item) {
         AdapterContextMenuInfo info = (AdapterContextMenuInfo) item.getMenuInfo();
-        final ComputerObject computer = (ComputerObject) pcGridAdapter.getItem(info.position);
+        final ComputerObject computer = (ComputerObject) pcGridAdapter.getItem(Objects.requireNonNull(info).position);
         switch (item.getItemId()) {
             case PAIR_ID:
                 doPair(computer.details);
