@@ -58,6 +58,8 @@ import android.os.PowerManager;
 import android.os.IBinder;
 import android.util.Log;
 import android.util.Rational;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 import android.view.Display;
 import android.view.InputDevice;
 import android.view.KeyCharacterMap;
@@ -70,6 +72,7 @@ import android.view.View.OnGenericMotionListener;
 import android.view.View.OnSystemUiVisibilityChangeListener;
 import android.view.View.OnTouchListener;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
@@ -156,6 +159,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private ToggleButton modifierCtrl, modifierAlt, modifierShift, modifierWin;
     private boolean isSpecialKeysBarVisible = false;
 
+    // Back gesture callback
+    private OnBackInvokedCallback onBackInvokedCallback;
+
     private MediaCodecDecoderRenderer decoderRenderer;
     private boolean reportedCrash;
     private WifiManager.WifiLock lowLatencyWifiLock;
@@ -221,6 +227,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         // Inflate the content
         setContentView(R.layout.activity_game);
+
+        // Register back gesture callback for Android 13+
+        onBackInvokedCallback = () -> showBackMenu();
+        getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                onBackInvokedCallback
+        );
 
         // Start the spinner
         spinner = SpinnerDialog.displayDialog(this, getResources().getString(R.string.conn_establishing_title),
@@ -330,6 +343,25 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             hideKeyboardInputBar();
         });
         findViewById(R.id.keyboardInputCancel).setOnClickListener(v -> hideKeyboardInputBar());
+
+        // Setup keyboard insets listener to position bars above soft keyboard
+        View rootView = getWindow().getDecorView().getRootView();
+        rootView.setOnApplyWindowInsetsListener((v, insets) -> {
+            int imeHeight = insets.getInsets(WindowInsets.Type.ime()).bottom;
+            int navigationBarHeight = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+
+            // Adjust bottom margin for special keys bar
+            FrameLayout.LayoutParams specialKeysParams = (FrameLayout.LayoutParams) specialKeysBar.getLayoutParams();
+            specialKeysParams.bottomMargin = Math.max(imeHeight, navigationBarHeight);
+            specialKeysBar.setLayoutParams(specialKeysParams);
+
+            // Adjust bottom margin for keyboard input bar
+            FrameLayout.LayoutParams inputBarParams = (FrameLayout.LayoutParams) keyboardInputBar.getLayoutParams();
+            inputBarParams.bottomMargin = Math.max(imeHeight, navigationBarHeight);
+            keyboardInputBar.setLayoutParams(inputBarParams);
+
+            return insets;
+        });
 
         inputCaptureProvider = InputCaptureManager.getInputCaptureProvider(this);
 
@@ -957,6 +989,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     protected void onDestroy() {
         super.onDestroy();
+
+        // Unregister back gesture callback
+        if (onBackInvokedCallback != null) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(onBackInvokedCallback);
+        }
 
         if (controllerHandler != null) {
             controllerHandler.destroy();
