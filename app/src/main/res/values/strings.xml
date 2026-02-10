@@ -348,22 +348,19 @@
     <string name="key_alt">Alt</string>
     <string name="key_shift">Shift</string>
     <string name="key_win">Win</string>
+    <string name="key_mode_sticky">Sticky</string>
+    <string name="key_mode_tap">Tap</string>
     <string name="key_tab">Tab</string>
-    <string name="key_insert">Ins</string>
     <string name="key_delete">Del</string>
-    <string name="key_home">Home</string>
-    <string name="key_end">End</string>
-    <string name="key_pgup">PgUp</string>
-    <string name="key_pgdn">PgDn</string>
-    <string name="key_prtsc">PrtSc</string>
     <string name="key_hide">Hide</string>
+    <string name="key_task_mgr">TaskMgr</string>
 
-    <!-- Back menu options -->
+    <!-- Back menu -->
     <string name="back_menu_title">Menu</string>
     <string name="back_menu_disconnect">Disconnect</string>
     <string name="back_menu_special_keys">Special Keys Keyboard</string>
     <string name="back_menu_text_input">Text Input Keyboard</string>
     <string name="back_menu_alt_f4">Send Alt+F4</string>
-    <string name="back_menu_ctrl_alt_del">Send Ctrl+Alt+Delete</string>
+    <string name="back_menu_task_manager">Open Task Manager</string>
     <string name="back_menu_cancel">Cancel</string>
 </resources>

@@ -76,6 +76,7 @@ import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ToggleButton;
@@ -156,9 +157,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     // Special keys bar views (shown with soft keyboard)
     private View specialKeysBar;
-    private ToggleButton modifierCtrl, modifierAlt, modifierShift, modifierWin;
+    private Button modifierCtrl, modifierAlt, modifierShift, modifierWin;
+    private ToggleButton modifierModeToggle;
     private boolean isSpecialKeysBarVisible = false;
-    private boolean modifierToggleSendEvents = true; // Flag to control when to send key events
+    // Track which modifier keys are currently held down (for sticky mode)
+    private boolean ctrlPressed = false, altPressed = false, shiftPressed = false, winPressed = false;
 
     // Back gesture callback
     private OnBackInvokedCallback onBackInvokedCallback;
@@ -292,28 +295,25 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // Initialize special keys bar (shown with 3-finger tap)
         specialKeysBar = findViewById(R.id.specialKeysBar);
 
-        // Initialize modifier toggle buttons
+        // Initialize modifier mode toggle and buttons
+        modifierModeToggle = findViewById(R.id.modifierModeToggle);
         modifierCtrl = findViewById(R.id.keyboardBtnCtrl);
         modifierAlt = findViewById(R.id.keyboardBtnAlt);
         modifierShift = findViewById(R.id.keyboardBtnShift);
         modifierWin = findViewById(R.id.keyboardBtnWin);
 
-        // Setup modifier toggle button listeners to send key events when toggled
+        // Setup modifier button click listeners
         if (modifierCtrl != null) {
-            modifierCtrl.setOnCheckedChangeListener((buttonView, isChecked) ->
-                sendModifierKeyEvent(KeyboardTranslator.VK_CTRL_LEFT, isChecked));
+            modifierCtrl.setOnClickListener(v -> handleModifierClick(KeyboardTranslator.VK_CTRL_LEFT, 0));
         }
         if (modifierAlt != null) {
-            modifierAlt.setOnCheckedChangeListener((buttonView, isChecked) ->
-                sendModifierKeyEvent(KeyboardTranslator.VK_ALT_LEFT, isChecked));
+            modifierAlt.setOnClickListener(v -> handleModifierClick(KeyboardTranslator.VK_ALT_LEFT, 1));
         }
         if (modifierShift != null) {
-            modifierShift.setOnCheckedChangeListener((buttonView, isChecked) ->
-                sendModifierKeyEvent(KeyboardTranslator.VK_SHIFT_LEFT, isChecked));
+            modifierShift.setOnClickListener(v -> handleModifierClick(KeyboardTranslator.VK_SHIFT_LEFT, 2));
         }
         if (modifierWin != null) {
-            modifierWin.setOnCheckedChangeListener((buttonView, isChecked) ->
-                sendModifierKeyEvent(KeyboardTranslator.VK_LWIN, isChecked));
+            modifierWin.setOnClickListener(v -> handleModifierClick(KeyboardTranslator.VK_LWIN, 3));
         }
 
         // Setup function key buttons (F1-F12)
@@ -333,13 +333,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // Setup other special keys
         findViewById(R.id.keyboardBtnEsc).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_ESCAPE));
         findViewById(R.id.keyboardBtnTab).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_TAB));
-        findViewById(R.id.keyboardBtnInsert).setOnClickListener(v -> sendSpecialKeyWithModifiers(0x2d)); // VK_INSERT
         findViewById(R.id.keyboardBtnDelete).setOnClickListener(v -> sendSpecialKeyWithModifiers(0x2e)); // VK_DELETE
-        findViewById(R.id.keyboardBtnHome).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_HOME));
-        findViewById(R.id.keyboardBtnEnd).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_END));
-        findViewById(R.id.keyboardBtnPgUp).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_PAGE_UP));
-        findViewById(R.id.keyboardBtnPgDn).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_PAGE_DOWN));
-        findViewById(R.id.keyboardBtnPrtSc).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_PRINTSCREEN));
+        findViewById(R.id.keyboardBtnTaskMgr).setOnClickListener(v -> sendCtrlShiftEsc());
         findViewById(R.id.specialKeysHide).setOnClickListener(v -> hideSpecialKeysBar());
 
         // Initialize keyboard input bar (shown with 4-finger tap)
@@ -1486,12 +1481,18 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         // Check for 4 finger tap first (keyboard with input dialog)
         if (currentTime - fourFingerDownTime < FOUR_FINGER_TAP_THRESHOLD) {
+            // Reset timestamps to prevent duplicate triggers
+            fourFingerDownTime = 0;
+            threeFingerDownTime = 0;
             showKeyboardWithInput();
             return true;
         }
 
         // Check for 3 finger tap (toggle keyboard with special keys bar)
         if (currentTime - threeFingerDownTime < THREE_FINGER_TAP_THRESHOLD) {
+            // Reset timestamps to prevent duplicate triggers
+            threeFingerDownTime = 0;
+            fourFingerDownTime = 0;
             toggleKeyboard();
             return true;
         }
@@ -1510,13 +1511,12 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 // Show special keys bar and keyboard
                 specialKeysBar.setVisibility(View.VISIBLE);
                 isSpecialKeysBarVisible = true;
-                // Reset modifier states without sending key events
-                modifierToggleSendEvents = false;
-                if (modifierCtrl != null) modifierCtrl.setChecked(false);
-                if (modifierAlt != null) modifierAlt.setChecked(false);
-                if (modifierShift != null) modifierShift.setChecked(false);
-                if (modifierWin != null) modifierWin.setChecked(false);
-                modifierToggleSendEvents = true;
+                // Reset modifier states
+                ctrlPressed = false;
+                altPressed = false;
+                shiftPressed = false;
+                winPressed = false;
+                updateModifierButtonStates();
                 // Show soft keyboard
                 streamView.requestFocus();
                 InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -1530,11 +1530,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             specialKeysBar.setVisibility(View.GONE);
             isSpecialKeysBarVisible = false;
             // Send key up events for any pressed modifier keys, then reset states
-            // The OnCheckedChangeListener will send the key up events automatically
-            if (modifierCtrl != null) modifierCtrl.setChecked(false);
-            if (modifierAlt != null) modifierAlt.setChecked(false);
-            if (modifierShift != null) modifierShift.setChecked(false);
-            if (modifierWin != null) modifierWin.setChecked(false);
+            resetModifierToggles();
             // Hide soft keyboard
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
             imm.hideSoftInputFromWindow(streamView.getWindowToken(), 0);
@@ -1595,37 +1591,85 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         resetModifierToggles();
     }
 
-    private byte getModifierStateFromToggles() {
-        byte modifiers = 0;
-        if (modifierCtrl != null && modifierCtrl.isChecked()) {
-            modifiers |= KeyboardPacket.MODIFIER_CTRL;
+    private void resetModifierToggles() {
+        // Release all modifier keys in sticky mode
+        if (ctrlPressed) {
+            sendModifierKeyEvent(KeyboardTranslator.VK_CTRL_LEFT, false);
+            ctrlPressed = false;
         }
-        if (modifierAlt != null && modifierAlt.isChecked()) {
-            modifiers |= KeyboardPacket.MODIFIER_ALT;
+        if (altPressed) {
+            sendModifierKeyEvent(KeyboardTranslator.VK_ALT_LEFT, false);
+            altPressed = false;
         }
-        if (modifierShift != null && modifierShift.isChecked()) {
-            modifiers |= KeyboardPacket.MODIFIER_SHIFT;
+        if (shiftPressed) {
+            sendModifierKeyEvent(KeyboardTranslator.VK_SHIFT_LEFT, false);
+            shiftPressed = false;
         }
-        if (modifierWin != null && modifierWin.isChecked()) {
-            modifiers |= KeyboardPacket.MODIFIER_META;
+        if (winPressed) {
+            sendModifierKeyEvent(KeyboardTranslator.VK_LWIN, false);
+            winPressed = false;
         }
-        return modifiers;
+        updateModifierButtonStates();
     }
 
-    private void resetModifierToggles() {
-        // Note: setChecked(false) will trigger the OnCheckedChangeListener
-        // which will send the key up events
-        if (modifierCtrl != null) modifierCtrl.setChecked(false);
-        if (modifierAlt != null) modifierAlt.setChecked(false);
-        if (modifierShift != null) modifierShift.setChecked(false);
-        if (modifierWin != null) modifierWin.setChecked(false);
+    private void updateModifierButtonStates() {
+        // Update button visual state based on pressed flags
+        if (modifierCtrl != null) {
+            modifierCtrl.setSelected(ctrlPressed);
+            modifierCtrl.setAlpha(ctrlPressed ? 1.0f : 0.6f);
+        }
+        if (modifierAlt != null) {
+            modifierAlt.setSelected(altPressed);
+            modifierAlt.setAlpha(altPressed ? 1.0f : 0.6f);
+        }
+        if (modifierShift != null) {
+            modifierShift.setSelected(shiftPressed);
+            modifierShift.setAlpha(shiftPressed ? 1.0f : 0.6f);
+        }
+        if (modifierWin != null) {
+            modifierWin.setSelected(winPressed);
+            modifierWin.setAlpha(winPressed ? 1.0f : 0.6f);
+        }
+    }
+
+    private void handleModifierClick(int vkCode, int modifierIndex) {
+        boolean isStickyMode = modifierModeToggle != null && modifierModeToggle.isChecked();
+
+        if (isStickyMode) {
+            // Sticky mode: toggle the modifier key state
+            boolean newState;
+            switch (modifierIndex) {
+                case 0: // Ctrl
+                    ctrlPressed = !ctrlPressed;
+                    newState = ctrlPressed;
+                    break;
+                case 1: // Alt
+                    altPressed = !altPressed;
+                    newState = altPressed;
+                    break;
+                case 2: // Shift
+                    shiftPressed = !shiftPressed;
+                    newState = shiftPressed;
+                    break;
+                case 3: // Win
+                    winPressed = !winPressed;
+                    newState = winPressed;
+                    break;
+                default:
+                    return;
+            }
+            sendModifierKeyEvent(vkCode, newState);
+            updateModifierButtonStates();
+        } else {
+            // Tap mode: send key down and up immediately
+            short keyCode = (short) (0x8000 | vkCode);
+            conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+            conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+        }
     }
 
     private void sendModifierKeyEvent(int vkCode, boolean keyDown) {
-        if (!modifierToggleSendEvents) {
-            return; // Don't send events during UI initialization/reset
-        }
-        short keyCode = (short) (0x80 << 8 | vkCode);
+        short keyCode = (short) (0x8000 | vkCode);
         if (keyDown) {
             conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
         } else {
@@ -1640,14 +1684,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             final int MENU_SPECIAL_KEYS = 1;
             final int MENU_TEXT_INPUT = 2;
             final int MENU_ALT_F4 = 3;
-            final int MENU_CTRL_ALT_DEL = 4;
+            final int MENU_TASK_MANAGER = 4;
 
             String[] menuItems = {
                     getString(R.string.back_menu_disconnect),
                     getString(R.string.back_menu_special_keys),
                     getString(R.string.back_menu_text_input),
                     getString(R.string.back_menu_alt_f4),
-                    getString(R.string.back_menu_ctrl_alt_del),
+                    getString(R.string.back_menu_task_manager),
                     getString(R.string.back_menu_cancel)
             };
 
@@ -1662,8 +1706,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                             showKeyboardWithInput();
                         } else if (which == MENU_ALT_F4) {
                             sendAltF4();
-                        } else if (which == MENU_CTRL_ALT_DEL) {
-                            sendCtrlAltDel();
+                        } else if (which == MENU_TASK_MANAGER) {
+                            sendCtrlShiftEsc();
                         }
                         // Cancel doesn't need action, dialog auto-dismisses
                     })
@@ -1687,21 +1731,22 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         conn.sendKeyboardInput(altKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
     }
 
-    private void sendCtrlAltDel() {
-        // Send Ctrl+Alt+Delete as individual key events for proper SAS handling
-        // This is required because Ctrl+Alt+Delete is a Windows security attention sequence
-        short ctrlKeyCode = (short) (0x80 << 8 | KeyboardTranslator.VK_CTRL_LEFT);
-        short altKeyCode = (short) (0x80 << 8 | KeyboardTranslator.VK_ALT_LEFT);
-        short deleteKeyCode = (short) (0x80 << 8 | 0x2e); // VK_DELETE = 0x2e
+    private void sendCtrlShiftEsc() {
+        // Send Ctrl+Shift+Escape to open Windows Task Manager
+        short ctrlKeyCode = (short) (0x8000 | 0xA2);   // VK_LCONTROL
+        short shiftKeyCode = (short) (0x8000 | 0xA0);  // VK_LSHIFT
+        short escKeyCode = (short) (0x8000 | 0x1B);    // VK_ESCAPE
 
-        // Press Ctrl, Alt, Delete in sequence
+        // Press Ctrl+Shift+Escape to open Task Manager
         conn.sendKeyboardInput(ctrlKeyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
-        conn.sendKeyboardInput(altKeyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
-        conn.sendKeyboardInput(deleteKeyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+        conn.sendKeyboardInput(shiftKeyCode, KeyboardPacket.KEY_DOWN, KeyboardPacket.MODIFIER_CTRL, (byte) 0);
+        conn.sendKeyboardInput(escKeyCode, KeyboardPacket.KEY_DOWN,
+            (byte)(KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_SHIFT), (byte) 0);
 
-        // Release Delete, Alt, Ctrl in reverse sequence
-        conn.sendKeyboardInput(deleteKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
-        conn.sendKeyboardInput(altKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+        // Release in reverse sequence
+        conn.sendKeyboardInput(escKeyCode, KeyboardPacket.KEY_UP,
+            (byte)(KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_SHIFT), (byte) 0);
+        conn.sendKeyboardInput(shiftKeyCode, KeyboardPacket.KEY_UP, KeyboardPacket.MODIFIER_CTRL, (byte) 0);
         conn.sendKeyboardInput(ctrlKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
     }
 
