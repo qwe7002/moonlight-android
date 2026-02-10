@@ -2513,69 +2513,63 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void connectionStatusUpdate(final int connectionStatus) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (prefConfig.disableWarnings) {
-                    return;
+        runOnUiThread(() -> {
+            if (prefConfig.disableWarnings) {
+                return;
+            }
+
+            if (connectionStatus == MoonBridge.CONN_STATUS_POOR) {
+                if (prefConfig.bitrate > 5000) {
+                    notificationOverlayView.setText(getResources().getString(R.string.slow_connection_msg));
+                }
+                else {
+                    notificationOverlayView.setText(getResources().getString(R.string.poor_connection_msg));
                 }
 
-                if (connectionStatus == MoonBridge.CONN_STATUS_POOR) {
-                    if (prefConfig.bitrate > 5000) {
-                        notificationOverlayView.setText(getResources().getString(R.string.slow_connection_msg));
-                    }
-                    else {
-                        notificationOverlayView.setText(getResources().getString(R.string.poor_connection_msg));
-                    }
+                requestedNotificationOverlayVisibility = View.VISIBLE;
+            }
+            else if (connectionStatus == MoonBridge.CONN_STATUS_OKAY) {
+                requestedNotificationOverlayVisibility = View.GONE;
+            }
 
-                    requestedNotificationOverlayVisibility = View.VISIBLE;
-                }
-                else if (connectionStatus == MoonBridge.CONN_STATUS_OKAY) {
-                    requestedNotificationOverlayVisibility = View.GONE;
-                }
-
-                if (!isHidingOverlays) {
-                    notificationOverlayView.setVisibility(requestedNotificationOverlayVisibility);
-                }
+            if (!isHidingOverlays) {
+                notificationOverlayView.setVisibility(requestedNotificationOverlayVisibility);
             }
         });
     }
 
     @Override
     public void connectionStarted() {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (spinner != null) {
-                    spinner.dismiss();
-                    spinner = null;
-                }
-
-                connected = true;
-                connecting = false;
-                updatePipAutoEnter();
-
-                // Hide the mouse cursor now after a short delay.
-                // Doing it before dismissing the spinner seems to be undone
-                // when the spinner gets displayed. On Android Q, even now
-                // is too early to capture. We will delay a second to allow
-                // the spinner to dismiss before capturing.
-                Handler h = new Handler();
-                h.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        setInputGrabState(true);
-                    }
-                }, 500);
-
-                // Keep the display on
-                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-
-                // Update GameManager state to indicate we're in game
-                UiHelper.notifyStreamConnected(Game.this);
-
-                hideSystemUi(1000);
+        runOnUiThread(() -> {
+            if (spinner != null) {
+                spinner.dismiss();
+                spinner = null;
             }
+
+            connected = true;
+            connecting = false;
+            updatePipAutoEnter();
+
+            // Hide the mouse cursor now after a short delay.
+            // Doing it before dismissing the spinner seems to be undone
+            // when the spinner gets displayed. On Android Q, even now
+            // is too early to capture. We will delay a second to allow
+            // the spinner to dismiss before capturing.
+            Handler h = new Handler();
+            h.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    setInputGrabState(true);
+                }
+            }, 500);
+
+            // Keep the display on
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+            // Update GameManager state to indicate we're in game
+            UiHelper.notifyStreamConnected(Game.this);
+
+            hideSystemUi(1000);
         });
 
         // Report this shortcut being used (off the main thread to prevent ANRs)
@@ -2592,12 +2586,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void displayMessage(final String message) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Toast.makeText(Game.this, message, Toast.LENGTH_LONG).show();
-            }
-        });
+        runOnUiThread(() -> Toast.makeText(Game.this, message, Toast.LENGTH_LONG).show());
     }
 
     @Override
@@ -2725,24 +2714,21 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public void onPerfUpdate(final String text) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                // Update active video codec info
-                if (decoderRenderer != null) {
-                    String decoderName = decoderRenderer.getActiveDecoderName();
-                    if (decoderName != null && !decoderName.isEmpty()) {
-                        activeVideoCodec = decoderName;
-                    } else {
-                        int videoFormat = decoderRenderer.getActiveVideoFormat();
-                        activeVideoCodec = getVideoCodecName(videoFormat);
-                    }
+        runOnUiThread(() -> {
+            // Update active video codec info
+            if (decoderRenderer != null) {
+                String decoderName = decoderRenderer.getActiveDecoderName();
+                if (decoderName != null && !decoderName.isEmpty()) {
+                    activeVideoCodec = decoderName;
+                } else {
+                    int videoFormat = decoderRenderer.getActiveVideoFormat();
+                    activeVideoCodec = getVideoCodecName(videoFormat);
                 }
+            }
 
-                performanceOverlayView.setText(text);
-                if (statsNotificationHelper != null) {
-                    statsNotificationHelper.showNotification(text, activeVideoCodec);
-                }
+            performanceOverlayView.setText(text);
+            if (statsNotificationHelper != null) {
+                statsNotificationHelper.showNotification(text, activeVideoCodec);
             }
         });
     }
@@ -2792,11 +2778,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    public boolean isAutoEnterPip() {
+/*    public boolean isAutoEnterPip() {
         return autoEnterPip;
     }
 
     public void setAutoEnterPip(boolean autoEnterPip) {
         this.autoEnterPip = autoEnterPip;
-    }
+    }*/
 }

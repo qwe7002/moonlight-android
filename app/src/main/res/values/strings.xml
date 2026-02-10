@@ -283,8 +283,6 @@
     <string name="toast_controller_type_changed">Gamepad type may be changed due to motion sensor emulation</string>
 
     <!-- Array strings -->
-    <string name="resolution_360p">360p</string>
-    <string name="resolution_480p">480p</string>
     <string name="resolution_720p">720p</string>
     <string name="resolution_1080p">1080p</string>
     <string name="resolution_1440p">1440p</string>
@@ -300,7 +298,7 @@
     <string name="audioconf_71surround">7.1 Surround Sound</string>
 
     <string name="videoformat_auto">Automatic (Recommended)</string>
-    <string name="videoformat_av1always">Prefer AV1 (Experimental)</string>
+    <string name="videoformat_av1always">Prefer AV1</string>
     <string name="videoformat_hevcalways">Prefer HEVC</string>
     <string name="videoformat_h264always">Prefer H.264</string>
 
