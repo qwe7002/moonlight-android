@@ -260,6 +260,10 @@ public class StreamSettings extends Activity {
         public void onCreate(Bundle savedInstanceState) {
             super.onCreate(savedInstanceState);
 
+            // Set MMKV as the preference data store before loading preferences
+            getPreferenceManager().setPreferenceDataStore(
+                    MMKVPreferenceManager.getPreferenceDataStore(getActivity()));
+
             addPreferencesFromResource(R.xml.preferences);
             PreferenceScreen screen = getPreferenceScreen();
 

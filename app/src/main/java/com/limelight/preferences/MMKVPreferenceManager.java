@@ -2,6 +2,8 @@ package com.limelight.preferences;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.preference.PreferenceDataStore;
+
 
 import com.tencent.mmkv.MMKV;
 
@@ -16,6 +18,7 @@ import java.util.Set;
 public class MMKVPreferenceManager {
     private static final String DEFAULT_MMKV_ID = "default_preferences";
     private static boolean initialized = false;
+    private static MMKVPreferenceDataStore dataStoreInstance;
 
     public static void initialize(Context context) {
         if (!initialized) {
@@ -34,6 +37,101 @@ public class MMKVPreferenceManager {
     public static SharedPreferences getDefaultSharedPreferences(Context context) {
         initialize(context);
         return new MMKVSharedPreferences(MMKV.mmkvWithID(DEFAULT_MMKV_ID));
+    }
+
+    /**
+     * Get a PreferenceDataStore implementation backed by MMKV.
+     * This can be used with PreferenceFragment/PreferenceFragmentCompat to store preferences in MMKV.
+     *
+     * @param context The context to use for initialization
+     * @return A PreferenceDataStore implementation backed by MMKV
+     */
+    public static PreferenceDataStore getPreferenceDataStore(Context context) {
+        initialize(context);
+        if (dataStoreInstance == null) {
+            dataStoreInstance = new MMKVPreferenceDataStore(MMKV.mmkvWithID(DEFAULT_MMKV_ID));
+        }
+        return dataStoreInstance;
+    }
+
+    /**
+     * PreferenceDataStore implementation that wraps MMKV.
+     * This allows PreferenceFragment to store preferences directly in MMKV.
+     */
+    public static class MMKVPreferenceDataStore implements PreferenceDataStore {
+        private final MMKV mmkv;
+
+        MMKVPreferenceDataStore(MMKV mmkv) {
+            this.mmkv = mmkv;
+        }
+
+        @Override
+        public void putString(String key,  String value) {
+            if (value == null) {
+                mmkv.removeValueForKey(key);
+            } else {
+                mmkv.encode(key, value);
+            }
+        }
+
+        @Override
+        public String getString(String key,  String defValue) {
+            return mmkv.decodeString(key, defValue);
+        }
+
+        @Override
+        public void putStringSet(String key,  Set<String> values) {
+            if (values == null) {
+                mmkv.removeValueForKey(key);
+            } else {
+                mmkv.encode(key, values);
+            }
+        }
+
+        @Override
+        public Set<String> getStringSet(String key, Set<String> defValues) {
+            return mmkv.decodeStringSet(key, defValues);
+        }
+
+        @Override
+        public void putInt(String key, int value) {
+            mmkv.encode(key, value);
+        }
+
+        @Override
+        public int getInt(String key, int defValue) {
+            return mmkv.decodeInt(key, defValue);
+        }
+
+        @Override
+        public void putLong(String key, long value) {
+            mmkv.encode(key, value);
+        }
+
+        @Override
+        public long getLong(String key, long defValue) {
+            return mmkv.decodeLong(key, defValue);
+        }
+
+        @Override
+        public void putFloat(String key, float value) {
+            mmkv.encode(key, value);
+        }
+
+        @Override
+        public float getFloat(String key, float defValue) {
+            return mmkv.decodeFloat(key, defValue);
+        }
+
+        @Override
+        public void putBoolean(String key, boolean value) {
+            mmkv.encode(key, value);
+        }
+
+        @Override
+        public boolean getBoolean(String key, boolean defValue) {
+            return mmkv.decodeBool(key, defValue);
+        }
     }
 
     /**

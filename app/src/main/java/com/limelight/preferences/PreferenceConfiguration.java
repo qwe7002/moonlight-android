@@ -427,16 +427,6 @@ public class PreferenceConfiguration {
         String str = prefs.getString(LEGACY_RES_FPS_PREF_STRING, null);
         if (str != null) {
             switch (str) {
-                case "360p30":
-                    config.width = 640;
-                    config.height = 360;
-                    config.fps = 30;
-                    break;
-                case "360p60":
-                    config.width = 640;
-                    config.height = 360;
-                    config.fps = 60;
-                    break;
                 case "720p30":
                     config.width = 1280;
                     config.height = 720;

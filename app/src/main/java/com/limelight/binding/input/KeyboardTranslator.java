@@ -55,11 +55,20 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
     public static final int VK_QUOTE = 222;
     public static final int VK_PAUSE = 19;
 
+    // Modifier key virtual key codes
+    public static final int VK_SHIFT_LEFT = 0xA0;
+    public static final int VK_SHIFT_RIGHT = 0xA1;
+    public static final int VK_CTRL_LEFT = 0xA2;
+    public static final int VK_CTRL_RIGHT = 0xA3;
+    public static final int VK_ALT_LEFT = 0xA4;
+    public static final int VK_ALT_RIGHT = 0xA5;
+    public static final int VK_LWIN = 0x5B;
+    public static final int VK_RWIN = 0x5C;
+
     private static class KeyboardMapping {
         private final InputDevice device;
         private final int[] deviceKeyCodeToQwertyKeyCode;
 
-        @TargetApi(33)
         public KeyboardMapping(InputDevice device) {
             int maxKeyCode = KeyEvent.getMaxKeyCode();
 
@@ -77,7 +86,6 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
             }
         }
 
-        @TargetApi(33)
         public int getDeviceKeyCodeForQwertyKeyCode(int qwertyKeyCode) {
             return device.getKeyCodeForKeyLocation(qwertyKeyCode);
         }
@@ -94,12 +102,10 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
     private final SparseArray<KeyboardMapping> keyboardMappings = new SparseArray<>();
 
     public KeyboardTranslator() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            for (int deviceId : InputDevice.getDeviceIds()) {
-                InputDevice device = InputDevice.getDevice(deviceId);
-                if (device != null && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
-                    keyboardMappings.set(deviceId, new KeyboardMapping(device));
-                }
+        for (int deviceId : InputDevice.getDeviceIds()) {
+            InputDevice device = InputDevice.getDevice(deviceId);
+            if (device != null && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
+                keyboardMappings.set(deviceId, new KeyboardMapping(device));
             }
         }
     }
@@ -111,9 +117,7 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
                 // Try to map this device-specific keycode onto a QWERTY layout.
                 // GFE assumes incoming keycodes are from a QWERTY keyboard.
                 int qwertyKeyCode = mapping.getQwertyKeyCodeForDeviceKeyCode(keycode);
-                if (qwertyKeyCode != KeyEvent.KEYCODE_UNKNOWN) {
-                    return true;
-                }
+                return qwertyKeyCode != KeyEvent.KEYCODE_UNKNOWN;
             }
         }
 
@@ -359,11 +363,9 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
 
     @Override
     public void onInputDeviceAdded(int index) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            InputDevice device = InputDevice.getDevice(index);
-            if (device != null && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
-                keyboardMappings.put(index, new KeyboardMapping(device));
-            }
+        InputDevice device = InputDevice.getDevice(index);
+        if (device != null && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
+            keyboardMappings.put(index, new KeyboardMapping(device));
         }
     }
 
@@ -376,11 +378,9 @@ public class KeyboardTranslator implements InputManager.InputDeviceListener {
     public void onInputDeviceChanged(int index) {
         keyboardMappings.remove(index);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            InputDevice device = InputDevice.getDevice(index);
-            if (device != null && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
-                keyboardMappings.set(index, new KeyboardMapping(device));
-            }
+        InputDevice device = InputDevice.getDevice(index);
+        if (device != null && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
+            keyboardMappings.set(index, new KeyboardMapping(device));
         }
     }
 }

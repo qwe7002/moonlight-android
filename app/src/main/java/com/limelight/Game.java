@@ -158,6 +158,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private View specialKeysBar;
     private ToggleButton modifierCtrl, modifierAlt, modifierShift, modifierWin;
     private boolean isSpecialKeysBarVisible = false;
+    private boolean modifierToggleSendEvents = true; // Flag to control when to send key events
 
     // Back gesture callback
     private OnBackInvokedCallback onBackInvokedCallback;
@@ -296,6 +297,24 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         modifierAlt = findViewById(R.id.keyboardBtnAlt);
         modifierShift = findViewById(R.id.keyboardBtnShift);
         modifierWin = findViewById(R.id.keyboardBtnWin);
+
+        // Setup modifier toggle button listeners to send key events when toggled
+        if (modifierCtrl != null) {
+            modifierCtrl.setOnCheckedChangeListener((buttonView, isChecked) ->
+                sendModifierKeyEvent(KeyboardTranslator.VK_CTRL_LEFT, isChecked));
+        }
+        if (modifierAlt != null) {
+            modifierAlt.setOnCheckedChangeListener((buttonView, isChecked) ->
+                sendModifierKeyEvent(KeyboardTranslator.VK_ALT_LEFT, isChecked));
+        }
+        if (modifierShift != null) {
+            modifierShift.setOnCheckedChangeListener((buttonView, isChecked) ->
+                sendModifierKeyEvent(KeyboardTranslator.VK_SHIFT_LEFT, isChecked));
+        }
+        if (modifierWin != null) {
+            modifierWin.setOnCheckedChangeListener((buttonView, isChecked) ->
+                sendModifierKeyEvent(KeyboardTranslator.VK_LWIN, isChecked));
+        }
 
         // Setup function key buttons (F1-F12)
         findViewById(R.id.keyboardBtnF1).setOnClickListener(v -> sendSpecialKeyWithModifiers(KeyboardTranslator.VK_F1));
@@ -1491,11 +1510,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 // Show special keys bar and keyboard
                 specialKeysBar.setVisibility(View.VISIBLE);
                 isSpecialKeysBarVisible = true;
-                // Reset modifier states
+                // Reset modifier states without sending key events
+                modifierToggleSendEvents = false;
                 if (modifierCtrl != null) modifierCtrl.setChecked(false);
                 if (modifierAlt != null) modifierAlt.setChecked(false);
                 if (modifierShift != null) modifierShift.setChecked(false);
                 if (modifierWin != null) modifierWin.setChecked(false);
+                modifierToggleSendEvents = true;
                 // Show soft keyboard
                 streamView.requestFocus();
                 InputMethodManager inputManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -1508,7 +1529,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         runOnUiThread(() -> {
             specialKeysBar.setVisibility(View.GONE);
             isSpecialKeysBarVisible = false;
-            // Reset modifier states
+            // Send key up events for any pressed modifier keys, then reset states
+            // The OnCheckedChangeListener will send the key up events automatically
             if (modifierCtrl != null) modifierCtrl.setChecked(false);
             if (modifierAlt != null) modifierAlt.setChecked(false);
             if (modifierShift != null) modifierShift.setChecked(false);
@@ -1563,13 +1585,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private void sendSpecialKeyWithModifiers(int vkCode) {
-        // Get modifier state from toggle buttons
-        byte modifiers = getModifierStateFromToggles();
-
+        // Since modifier keys are now sent separately when toggled,
+        // we only need to send the main key without modifier flags
         short keyCode = (short) (0x80 << 8 | vkCode);
-        sendKeyCombo(keyCode, modifiers);
+        conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+        conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
 
-        // Reset modifier toggle buttons after sending
+        // Reset modifier toggle buttons after sending (this will send key up events)
         resetModifierToggles();
     }
 
@@ -1591,10 +1613,24 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     }
 
     private void resetModifierToggles() {
+        // Note: setChecked(false) will trigger the OnCheckedChangeListener
+        // which will send the key up events
         if (modifierCtrl != null) modifierCtrl.setChecked(false);
         if (modifierAlt != null) modifierAlt.setChecked(false);
         if (modifierShift != null) modifierShift.setChecked(false);
         if (modifierWin != null) modifierWin.setChecked(false);
+    }
+
+    private void sendModifierKeyEvent(int vkCode, boolean keyDown) {
+        if (!modifierToggleSendEvents) {
+            return; // Don't send events during UI initialization/reset
+        }
+        short keyCode = (short) (0x80 << 8 | vkCode);
+        if (keyDown) {
+            conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+        } else {
+            conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+        }
     }
 
     private void showBackMenu() {
@@ -1636,22 +1672,37 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         });
     }
 
-    private void sendKeyCombo(short keyCode, byte modifiers) {
-        conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_DOWN, modifiers, (byte) 0);
-        conn.sendKeyboardInput(keyCode, KeyboardPacket.KEY_UP, modifiers, (byte) 0);
-    }
 
     private void sendAltF4() {
-        // Send Alt+F4 key combination
+        // Send Alt+F4 as individual key events
+        short altKeyCode = (short) (0x80 << 8 | KeyboardTranslator.VK_ALT_LEFT);
         short f4KeyCode = (short) (0x80 << 8 | (KeyboardTranslator.VK_F1 + 3)); // F4
-        sendKeyCombo(f4KeyCode, KeyboardPacket.MODIFIER_ALT);
+
+        // Press Alt, F4 in sequence
+        conn.sendKeyboardInput(altKeyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+        conn.sendKeyboardInput(f4KeyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+
+        // Release F4, Alt in reverse sequence
+        conn.sendKeyboardInput(f4KeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+        conn.sendKeyboardInput(altKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
     }
 
     private void sendCtrlAltDel() {
-        // Send Ctrl+Alt+Delete key combination
+        // Send Ctrl+Alt+Delete as individual key events for proper SAS handling
+        // This is required because Ctrl+Alt+Delete is a Windows security attention sequence
+        short ctrlKeyCode = (short) (0x80 << 8 | KeyboardTranslator.VK_CTRL_LEFT);
+        short altKeyCode = (short) (0x80 << 8 | KeyboardTranslator.VK_ALT_LEFT);
         short deleteKeyCode = (short) (0x80 << 8 | 0x2e); // VK_DELETE = 0x2e
-        byte modifiers = (byte) (KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_ALT);
-        sendKeyCombo(deleteKeyCode, modifiers);
+
+        // Press Ctrl, Alt, Delete in sequence
+        conn.sendKeyboardInput(ctrlKeyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+        conn.sendKeyboardInput(altKeyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+        conn.sendKeyboardInput(deleteKeyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+
+        // Release Delete, Alt, Ctrl in reverse sequence
+        conn.sendKeyboardInput(deleteKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+        conn.sendKeyboardInput(altKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+        conn.sendKeyboardInput(ctrlKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
     }
 
     private byte getLiTouchTypeFromEvent(MotionEvent event) {
