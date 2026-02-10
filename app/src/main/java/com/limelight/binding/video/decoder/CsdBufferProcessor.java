@@ -8,13 +8,12 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 
 /**
- * Handles Codec Specific Data (CSD) buffer processing for H.264/H.265/AV1.
+ * Handles Codec Specific Data (CSD) buffer processing for H.265/AV1.
  * <p>
  * This class manages:
  * - VPS (Video Parameter Set) for HEVC
- * - SPS (Sequence Parameter Set) for H.264 and HEVC
- * - PPS (Picture Parameter Set) for H.264 and HEVC
- * - SPS patching and bitstream restrictions
+ * - SPS (Sequence Parameter Set) for HEVC
+ * - PPS (Picture Parameter Set) for HEVC
  */
 public class CsdBufferProcessor {
 
