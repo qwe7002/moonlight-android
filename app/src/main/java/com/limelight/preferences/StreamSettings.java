@@ -139,23 +139,21 @@ public class StreamSettings extends AppCompatActivity {
 
             if (insetsRemoved) {
                 newName = getResources().getString(R.string.resolution_prefix_native_fullscreen);
-            }
-            else {
+            } else {
                 newName = getResources().getString(R.string.resolution_prefix_native);
             }
 
             if (PreferenceConfiguration.isSquarishScreen(nativeWidth, nativeHeight)) {
                 if (portrait) {
                     newName += " " + getResources().getString(R.string.resolution_prefix_native_portrait);
-                }
-                else {
+                } else {
                     newName += " " + getResources().getString(R.string.resolution_prefix_native_landscape);
                 }
             }
 
-            newName += " ("+nativeWidth+"x"+nativeHeight+")";
+            newName += " (" + nativeWidth + "x" + nativeHeight + ")";
 
-            String newValue = nativeWidth+"x"+nativeHeight;
+            String newValue = nativeWidth + "x" + nativeHeight;
 
             // Check if the native resolution is already present
             for (CharSequence value : pref.getEntryValues()) {
@@ -219,8 +217,8 @@ public class StreamSettings extends AppCompatActivity {
             }
 
             // Create the new arrays
-            CharSequence[] entries = new CharSequence[pref.getEntries().length-matchingCount];
-            CharSequence[] entryValues = new CharSequence[pref.getEntryValues().length-matchingCount];
+            CharSequence[] entries = new CharSequence[pref.getEntries().length - matchingCount];
+            CharSequence[] entryValues = new CharSequence[pref.getEntryValues().length - matchingCount];
             int outIndex = 0;
             for (int i = 0; i < pref.getEntryValues().length; i++) {
                 if (pref.getEntryValues()[i].toString().equalsIgnoreCase(value)) {
@@ -340,7 +338,7 @@ public class StreamSettings extends AppCompatActivity {
 
             PreferenceCategory category_gamepad_settings = findPreference("category_gamepad_settings");
             // Remove the vibration options if the device can't vibrate
-            if (!((Vibrator)requireActivity().getSystemService(Context.VIBRATOR_SERVICE)).hasVibrator()) {
+            if (!((Vibrator) requireActivity().getSystemService(Context.VIBRATOR_SERVICE)).hasVibrator()) {
                 if (category_gamepad_settings != null) {
                     category_gamepad_settings.removePreference(findPreference("checkbox_vibrate_fallback"));
                     category_gamepad_settings.removePreference(findPreference("seekbar_vibrate_fallback_strength"));
@@ -350,8 +348,7 @@ public class StreamSettings extends AppCompatActivity {
                 if (category != null) {
                     category.removePreference(findPreference("checkbox_vibrate_osc"));
                 }
-            }
-            else if (!((Vibrator)requireActivity().getSystemService(Context.VIBRATOR_SERVICE)).hasAmplitudeControl()) {
+            } else if (!((Vibrator) requireActivity().getSystemService(Context.VIBRATOR_SERVICE)).hasAmplitudeControl()) {
                 // Remove the vibration strength selector of the device doesn't have amplitude control
                 if (category_gamepad_settings != null) {
                     category_gamepad_settings.removePreference(findPreference("seekbar_vibrate_fallback_strength"));
@@ -408,11 +405,9 @@ public class StreamSettings extends AppCompatActivity {
 
                 if ((width >= 3840 || height >= 2160) && maxSupportedResW < 3840) {
                     maxSupportedResW = 3840;
-                }
-                else if ((width >= 2560 || height >= 1440) && maxSupportedResW < 2560) {
+                } else if ((width >= 2560 || height >= 1440) && maxSupportedResW < 2560) {
                     maxSupportedResW = 2560;
-                }
-                else if ((width >= 1920 || height >= 1080) && maxSupportedResW < 1920) {
+                } else if ((width >= 1920 || height >= 1080) && maxSupportedResW < 1920) {
                     maxSupportedResW = 1920;
                 }
 
@@ -431,17 +426,15 @@ public class StreamSettings extends AppCompatActivity {
             if (avcDecoder != null) {
                 Range<Integer> avcWidthRange = Objects.requireNonNull(avcDecoder.getCapabilitiesForType("video/avc").getVideoCapabilities()).getSupportedWidths();
 
-                LimeLog.info("AVC supported width range: "+avcWidthRange.getLower()+" - "+avcWidthRange.getUpper());
+                LimeLog.info("AVC supported width range: " + avcWidthRange.getLower() + " - " + avcWidthRange.getUpper());
 
                 // If 720p is not reported as supported, ignore all results from this API
                 if (avcWidthRange.contains(1280)) {
                     if (avcWidthRange.contains(3840) && maxSupportedResW < 3840) {
                         maxSupportedResW = 3840;
-                    }
-                    else if (avcWidthRange.contains(1920) && maxSupportedResW < 1920) {
+                    } else if (avcWidthRange.contains(1920) && maxSupportedResW < 1920) {
                         maxSupportedResW = 1920;
-                    }
-                    else if (maxSupportedResW < 1280) {
+                    } else if (maxSupportedResW < 1280) {
                         maxSupportedResW = 1280;
                     }
                 }
@@ -450,23 +443,21 @@ public class StreamSettings extends AppCompatActivity {
             if (hevcDecoder != null) {
                 Range<Integer> hevcWidthRange = Objects.requireNonNull(hevcDecoder.getCapabilitiesForType("video/hevc").getVideoCapabilities()).getSupportedWidths();
 
-                LimeLog.info("HEVC supported width range: "+hevcWidthRange.getLower()+" - "+hevcWidthRange.getUpper());
+                LimeLog.info("HEVC supported width range: " + hevcWidthRange.getLower() + " - " + hevcWidthRange.getUpper());
 
                 // If 720p is not reported as supported, ignore all results from this API
                 if (hevcWidthRange.contains(1280)) {
                     if (hevcWidthRange.contains(3840) && maxSupportedResW < 3840) {
                         maxSupportedResW = 3840;
-                    }
-                    else if (hevcWidthRange.contains(1920) && maxSupportedResW < 1920) {
+                    } else if (hevcWidthRange.contains(1920) && maxSupportedResW < 1920) {
                         maxSupportedResW = 1920;
-                    }
-                    else if (maxSupportedResW < 1280) {
+                    } else if (maxSupportedResW < 1280) {
                         maxSupportedResW = 1280;
                     }
                 }
             }
 
-            LimeLog.info("Maximum resolution slot: "+maxSupportedResW);
+            LimeLog.info("Maximum resolution slot: " + maxSupportedResW);
 
             if (maxSupportedResW != 0) {
                 if (maxSupportedResW < 3840) {
@@ -566,18 +557,6 @@ public class StreamSettings extends AppCompatActivity {
                 PreferenceCategory category = findPreference("category_advanced_settings");
                 if (category != null) {
                     category.removePreference(findPreference("checkbox_enable_hdr"));
-                }
-            }
-            else if (PreferenceConfiguration.isShieldAtvFirmwareWithBrokenHdr()) {
-                LimeLog.info("Disabling HDR toggle on old broken SHIELD TV firmware");
-                PreferenceCategory category = findPreference("category_advanced_settings");
-                if (category != null) {
-                    CheckBoxPreference hdrPref = category.findPreference("checkbox_enable_hdr");
-                    if (hdrPref != null) {
-                        hdrPref.setEnabled(false);
-                        hdrPref.setChecked(false);
-                        hdrPref.setSummary("Update the firmware on your NVIDIA SHIELD Android TV to enable HDR");
-                    }
                 }
             }
 

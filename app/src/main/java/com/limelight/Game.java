@@ -32,6 +32,7 @@ import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
 import com.limelight.utils.SpinnerDialog;
 import com.limelight.utils.StatsNotificationHelper;
+import com.limelight.utils.LatencyNotificationHelper;
 import com.limelight.utils.UiHelper;
 
 import android.annotation.SuppressLint;
@@ -1106,40 +1107,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (prefConfig.enableLatencyToast) {
                 int averageEndToEndLat = decoderRenderer.getAverageEndToEndLatency();
                 int averageDecoderLat = decoderRenderer.getAverageDecoderLatency();
-                String message = null;
-                if (averageEndToEndLat > 0) {
-                    message = getResources().getString(R.string.conn_client_latency) + " " + averageEndToEndLat + " ms";
-                    if (averageDecoderLat > 0) {
-                        message += " (" + getResources().getString(R.string.conn_client_latency_hw) + " " + averageDecoderLat + " ms)";
-                    }
-                } else if (averageDecoderLat > 0) {
-                    message = getResources().getString(R.string.conn_hardware_latency) + " " + averageDecoderLat + " ms";
-                }
 
-                // Add the video codec to the post-stream toast
-                if (message != null) {
-                    message += " [";
-
-                    if ((videoFormat & MoonBridge.VIDEO_FORMAT_MASK_H264) != 0) {
-                        message += "H.264";
-                    } else if ((videoFormat & MoonBridge.VIDEO_FORMAT_MASK_H265) != 0) {
-                        message += "HEVC";
-                    } else if ((videoFormat & MoonBridge.VIDEO_FORMAT_MASK_AV1) != 0) {
-                        message += "AV1";
-                    } else {
-                        message += "UNKNOWN";
-                    }
-
-                    if ((videoFormat & MoonBridge.VIDEO_FORMAT_MASK_10BIT) != 0) {
-                        message += " HDR";
-                    }
-
-                    message += "]";
-                }
-
-                if (message != null) {
-                    Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-                }
+                // Show latency notification instead of toast
+                LatencyNotificationHelper latencyNotification = new LatencyNotificationHelper(this);
+                latencyNotification.showLatencyNotification(averageEndToEndLat, averageDecoderLat, videoFormat);
             }
 
             // Clear the tombstone count if we terminated normally

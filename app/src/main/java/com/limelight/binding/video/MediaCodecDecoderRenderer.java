@@ -885,7 +885,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
     @Override
     public int submitDecodeUnit(byte[] decodeUnitData, int decodeUnitLength, int decodeUnitType,
                                 int frameNumber, int frameType, char frameHostProcessingLatency,
-                                long receiveTimeMs, long enqueueTimeMs) {
+                                long receiveTimeUs, long enqueueTimeUs) {
         if (stopping) {
             return MoonBridge.DR_OK;
         }
@@ -931,10 +931,11 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
             // Count time from first packet received to enqueue time as receive time
             // We will count DU queue time as part of decoding, because it is directly
             // caused by a slow decoder.
-            activeStats.totalTimeMs += enqueueTimeMs - receiveTimeMs;
+            // Note: receiveTimeUs and enqueueTimeUs are in microseconds, convert to ms
+            activeStats.totalTimeMs += (enqueueTimeUs - receiveTimeUs) / 1000;
         }
 
-        return submitFrameData(decodeUnitData, decodeUnitLength, frameType, enqueueTimeMs, csdSubmittedForThisFrame);
+        return submitFrameData(decodeUnitData, decodeUnitLength, frameType, enqueueTimeUs, csdSubmittedForThisFrame);
     }
 
     private int handleIdrFrameCsd(int decodeUnitType, byte[] decodeUnitData, int decodeUnitLength) {if (decodeUnitType == MoonBridge.BUFFER_TYPE_VPS) {
@@ -976,13 +977,13 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
     }
 
     private int submitFrameData(byte[] decodeUnitData, int decodeUnitLength,
-                                 int frameType, long enqueueTimeMs, boolean csdSubmittedForThisFrame) {
+                                 int frameType, long enqueueTimeUs, boolean csdSubmittedForThisFrame) {
         if (!fetchNextInputBuffer()) {
             return MoonBridge.DR_NEED_IDR;
         }
 
         int codecFlags = prepareCodecFlags(frameType, csdSubmittedForThisFrame);
-        long timestampUs = calculateTimestampUs(enqueueTimeMs);
+        long timestampUs = calculateTimestampUs(enqueueTimeUs);
 
         if (!validateAndCopyDecodeUnit(decodeUnitData, decodeUnitLength)) {
             return MoonBridge.DR_NEED_IDR;
@@ -1011,8 +1012,10 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         return codecFlags;
     }
 
-    private long calculateTimestampUs(long enqueueTimeMs) {
-        long timestampUs = enqueueTimeMs * 1000;
+    private long calculateTimestampUs(long enqueueTimeUs) {
+        // Use SystemClock.uptimeMillis() as the timestamp basis to ensure proper decode time calculation
+        // The native enqueueTimeUs has a different time base than SystemClock, so we use Java's time
+        long timestampUs = SystemClock.uptimeMillis() * 1000;
         if (timestampUs <= lastTimestampUs) {
             // We can't submit multiple buffers with the same timestamp
             // so bump it up by one before queuing

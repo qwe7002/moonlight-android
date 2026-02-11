@@ -309,6 +309,10 @@
     <string name="stats_notification_channel_description">Shows real-time streaming performance statistics</string>
     <string name="stats_notification_title">Streaming Statistics</string>
 
+    <string name="latency_notification_channel_name">Streaming Latency Statistics</string>
+    <string name="latency_notification_channel_description">Shows latency statistics after streaming session ends</string>
+    <string name="latency_notification_title">Stream Latency Report</string>
+
     <!-- Keyboard Input Dialog -->
     <string name="keyboard_input_title">Send Text</string>
     <string name="keyboard_input_hint">Type text to send…</string>

@@ -476,12 +476,6 @@ public class PreferenceConfiguration {
         prefs.edit().putString(LANGUAGE_PREF_STRING, DEFAULT_LANGUAGE).apply();
     }
 
-    public static boolean isShieldAtvFirmwareWithBrokenHdr() {
-        // This particular Shield TV firmware crashes when using HDR
-        // https://www.nvidia.com/en-us/geforce/forums/notifications/comment/155192/
-        return Build.MANUFACTURER.equalsIgnoreCase("NVIDIA") &&
-                Build.FINGERPRINT.contains("PPR1.180610.011/4079208_2235.1395");
-    }
 
     public static boolean isMdnsEnabled(Context context) {
         SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
@@ -505,13 +499,6 @@ public class PreferenceConfiguration {
         String str = prefs.getString(LEGACY_RES_FPS_PREF_STRING, null);
         if (str != null) {
             switch (str) {
-                case "720p30":
-                case "720p60":
-                    // Upgrade 720p to 1080p
-                    config.width = 1920;
-                    config.height = 1080;
-                    config.fps = str.endsWith("30") ? 30 : 60;
-                    break;
                 case "1080p30":
                     config.width = 1920;
                     config.height = 1080;
@@ -611,7 +598,7 @@ public class PreferenceConfiguration {
         config.smallIconMode = prefs.getBoolean(SMALL_ICONS_PREF_STRING, getDefaultSmallMode(context));
         config.multiController = prefs.getBoolean(MULTI_CONTROLLER_PREF_STRING, DEFAULT_MULTI_CONTROLLER);
         config.usbDriver = prefs.getBoolean(USB_DRIVER_PREF_SRING, DEFAULT_USB_DRIVER);
-        config.enableHdr = prefs.getBoolean(ENABLE_HDR_PREF_STRING, DEFAULT_ENABLE_HDR) && !isShieldAtvFirmwareWithBrokenHdr();
+        config.enableHdr = prefs.getBoolean(ENABLE_HDR_PREF_STRING, DEFAULT_ENABLE_HDR);
         config.enablePip = prefs.getBoolean(ENABLE_PIP_PREF_STRING, DEFAULT_ENABLE_PIP);
         config.enablePerfOverlay = prefs.getBoolean(ENABLE_PERF_OVERLAY_STRING, DEFAULT_ENABLE_PERF_OVERLAY);
         config.enableStatsNotification = prefs.getBoolean(ENABLE_STATS_NOTIFICATION_STRING, DEFAULT_ENABLE_STATS_NOTIFICATION);
