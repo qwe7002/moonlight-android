@@ -334,15 +334,19 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
                         highFreq ? (short)32767 : 0);
             } else if (vibratorInfo.vibrator != null && vibratorInfo.vibrator.hasVibrator()) {
                 // Use waveform to simulate different motor types on single-motor devices
-                vibrateSingleMotorSimulation(vibratorInfo.vibrator, lowFreq, highFreq);
+                // Don't simulate trigger vibration on single-motor devices
+                if (!leftTrigger && !rightTrigger) {
+                    vibrateSingleMotorSimulation(vibratorInfo.vibrator, lowFreq, highFreq);
+                }
             }
         }
 
         // If no gamepad vibrators found, try device vibrator
-        if (gamepadVibrators.isEmpty()) {
+        // Don't simulate trigger vibration on single-motor devices
+        if (gamepadVibrators.isEmpty() && !leftTrigger && !rightTrigger) {
             Vibrator deviceVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-            if (deviceVibrator != null && deviceVibrator.hasVibrator() && (lowFreq || highFreq || leftTrigger || rightTrigger)) {
-                vibrateSingleMotorSimulation(deviceVibrator, lowFreq || leftTrigger, highFreq || rightTrigger);
+            if (deviceVibrator != null && deviceVibrator.hasVibrator() && (lowFreq || highFreq)) {
+                vibrateSingleMotorSimulation(deviceVibrator, lowFreq, highFreq);
             }
         }
     }
