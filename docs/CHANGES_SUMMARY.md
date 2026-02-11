@@ -1,4 +1,18 @@
-# Moonlight Android 修改總結
+# Deragabu - Moonlight Android 修改總結
+
+Deragabu 是 [Moonlight Android](https://github.com/moonlight-stream/moonlight-android) 的修改版本，專注於提供更好的高質量串流體驗和改進的遊戲控制器支持。
+
+## 硬性要求
+
+| 要求項目 | 規格 |
+|---------|------|
+| **Android 版本** | Android 13+ (API 33) |
+| **CPU 架構** | 僅支援 ARM64 |
+| **視頻解碼器** | 需要 MediaCodec C2 解碼器 |
+| **視頻編碼** | 僅支援 HEVC (H.265) 或 AV1 |
+| **最低解析度** | 1080P |
+
+---
 
 ## 1. 移除 H.264 和 720P 支持
 
@@ -43,12 +57,15 @@
 - 提升整體串流質量和性能
 - 簡化設置選項，減少用戶混淆
 
-## 2. USB 權限持續授權與 Razer Kishi 系列支持
+## 2. USB 權限持續授權、Razer Kishi 系列支持與震動功能改進
 
 ### 問題
-每次連接 USB 遊戲控制器時，Android 都會要求重新授予 USB 權限。這會打斷遊戲體驗。
+1. 每次連接 USB 遊戲控制器時，Android 都會要求重新授予 USB 權限。這會打斷遊戲體驗。
+2. 震動測試功能沒有正確檢查控制器是否支持震動就直接嘗試震動。
 
 ### 修復內容
+
+#### USB 權限持續化
 - **usb_device_filter.xml** (新建):
   - 創建 USB 設備過濾器，聲明支持的所有 Xbox 控制器（Xbox One、Xbox 360、Xbox 360 無線）
   - 包含所有支持的廠商 ID（Microsoft、Mad Catz、Razer、PowerA、Hori 等）
@@ -65,6 +82,14 @@
 - **Xbox360Controller.java**:
   - 更新 Razer Vendor ID 註釋，包含 Kishi 系列
 
+#### 震動功能改進
+- **GamepadTestActivity.java**:
+  - 在 `VibratorInfo` 類別中添加 `hasVibrator` 屬性
+  - 在掃描遊戲控制器時檢查 `device.getVibrator().hasVibrator()`
+  - **只有支持震動的控制器才會被添加到震動測試列表中**
+  - 避免對不支持震動的控制器進行無效的震動操作
+  - 提供更準確的震動功能檢測和更好的用戶體驗
+
 ### 支持的 Razer 控制器
 - Razer Wildcat (Xbox One)
 - Razer Kishi (原版，Android USB-C)
@@ -79,8 +104,10 @@
 - 勾選「默認使用此應用」後，以後連接相同設備不再需要重新授權
 - 大幅提升用戶體驗，特別是頻繁連接/斷開控制器的場景
 - **Razer Kishi 系列用戶現在可以享受無縫連接體驗**
+- **震動測試現在只對支持震動的控制器進行測試**，避免無效操作
+- 提供更準確的控制器震動功能檢測
 
-## 2. 鍵盤輸入欄增強
+## 3. 鍵盤輸入欄增強
 
 ### 功能
 在鍵盤輸入欄中添加「發送並回車」按鈕，方便在遊戲中快速發送命令。
@@ -102,7 +129,7 @@
 - **Send + Enter** - 發送文字並自動按下回車鍵
 - **Cancel** - 關閉輸入欄
 
-## 3. Pairing 實現錯誤修復
+## 4. Pairing 實現錯誤修復
 
 ### 問題
 在 `PairingService` 中創建 `AddressTuple` 時使用了錯誤的端口。應該使用 HTTP 端口（通常是 47989），而不是 HTTPS 端口（通常是 47984）。
@@ -116,7 +143,7 @@
 - **PcView.java**:
   - 在啟動 PairingService 時傳遞 `computer.activeAddress.port`（HTTP 端口）
 
-## 4. 通知權限正確請求（Android 13+）
+## 5. 通知權限正確請求（Android 13+）
 
 ### 問題
 在 Android 13 (API 33+) 上，`POST_NOTIFICATIONS` 權限需要在運行時請求。配對服務啟動前台服務時沒有請求此權限。
@@ -129,7 +156,7 @@
   - 添加 `onRequestPermissionsResult` 處理權限請求結果
   - 將配對服務啟動邏輯提取到 `startPairingService` 方法
 
-## 5. 配對時自動複製 PIN 並打開瀏覽器
+## 6. 配對時自動複製 PIN 並打開瀏覽器
 
 ### 功能
 配對開始時：
@@ -145,7 +172,7 @@
 - **strings.xml**:
   - 添加 `pair_browser_open_failed` 字符串資源
 
-## 6. 簡化添加服務器為對話框
+## 7. 簡化添加服務器為對話框
 
 ### 問題
 原來使用單獨的 Activity (`AddComputerManually`) 來添加服務器，用戶體驗不夠流暢。
@@ -162,7 +189,7 @@
   - 添加 `showAddComputerDialog` 方法處理對話框邏輯
   - 添加 `parseHostInput` 方法解析用戶輸入（支持 IPv4、IPv6、主機名和端口）
 
-## 5. 簡化性能統計通知內容
+## 8. 簡化性能統計通知內容
 
 ### 功能
 - 簡化性能統計通知顯示的內容
@@ -176,7 +203,7 @@
   - 從完整統計文本中提取 FPS、Mbps 和 RTT
   - 移除了 BigTextStyle，使用更緊湊的格式
 
-## 6. 小米 HyperOS 3 超級島支持
+## 9. 小米 HyperOS 3 超級島支持
 
 ### 功能
 在小米 HyperOS 3+ 設備上，統計通知將使用超級島（Capsule）模式顯示。
@@ -192,7 +219,7 @@
 ### 參考文檔
 - https://dev.mi.com/xiaomihyperos/documentation/detail?pId=2140
 
-## 7. 添加 WakeLock 防止設備休眠
+## 10. 添加 WakeLock 防止設備休眠
 
 ### 功能
 在串流期間保持設備屏幕常亮，防止設備進入休眠狀態。
@@ -210,7 +237,7 @@
 - 使用 `ACQUIRE_CAUSES_WAKEUP` 在獲取鎖時喚醒設備
 - 已在 AndroidManifest.xml 中聲明 `WAKE_LOCK` 權限
 
-## 8. 在性能統計通知中顯示視頻編碼器
+## 11. 在性能統計通知中顯示視頻編碼器
 
 ### 功能
 在性能統計通知標題中顯示當前使用的視頻編碼器（H.264、HEVC、AV1 等）。
@@ -242,10 +269,22 @@
 2. `app/src/main/java/com/limelight/PcView.java`
 3. `app/src/main/java/com/limelight/utils/Dialog.java`
 4. `app/src/main/java/com/limelight/utils/StatsNotificationHelper.java`
-5. `app/src/main/java/com/limelight/Game.java` ⭐ 新增
-6. `app/src/main/res/values/strings.xml`
+5. `app/src/main/java/com/limelight/Game.java`
+6. `app/src/main/java/com/limelight/preferences/GamepadTestActivity.java` ⭐ 震動功能改進
+7. `app/src/main/res/values/strings.xml`
+8. `app/src/main/res/xml/usb_device_filter.xml` ⭐ 新增
+9. `app/src/main/AndroidManifest.xml`
 
 ## 測試建議
+
+### USB 控制器與震動功能測試
+1. 連接各種 USB 遊戲控制器（Xbox、PlayStation、Razer Kishi 等）
+2. 測試首次連接時的權限授予流程
+3. 勾選「默認使用此應用」後，斷開並重新連接控制器，驗證不再彈出權限請求
+4. **進入遊戲控制器測試界面，測試震動功能**
+5. **驗證只有支持震動的控制器才會顯示震動測試選項**
+6. **測試不支持震動的控制器是否正確被排除**
+7. 測試 Razer Kishi 系列的震動效果
 
 ### 配對功能測試
 1. 在 Android 13+ 設備上測試配對功能

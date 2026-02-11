@@ -1,22 +1,27 @@
 # Deragabu
 
-Deragabu is an open source client for [Sunshine](https://github.com/LizardByte/Sunshine).
+Deragabu is a modified version of [Moonlight Android](https://github.com/moonlight-stream/moonlight-android), an open source client for [Sunshine](https://github.com/LizardByte/Sunshine) and NVIDIA GameStream.
 
 Deragabu will allow you to stream your full collection of games from your PC to your Android device,
 whether in your own home or over the internet.
 
+## Requirements
+
+| Requirement | Specification |
+|-------------|---------------|
+| **Android Version** | Android 13+ (API 33) |
+| **CPU Architecture** | ARM64 only |
+| **Video Decoder** | MediaCodec C2 decoder required |
+| **Video Codec** | HEVC (H.265) or AV1 only |
+| **Minimum Resolution** | 1080P |
+
 ## Features
 * Stream games from your PC to your Android device
-* Support Sunshine
-* Only Supports Android 13+ (targetSdk 34)
-* Only supports ARM64 devices (no x86 support)
-* Only c2 decoding is supported
-* **HEVC (H.265) and AV1 only** - H.264 support removed for better quality streaming
-* **Minimum resolution: 1080P** - 720P support removed, default resolution upgraded to 1080P
 * **Persistent USB controller permissions** - No need to re-authorize USB controllers every time they reconnect
 * On-screen keyboard input with text entry bar
 * Auto-copy PIN to clipboard and auto-open browser during pairing process
 * Improved frame statistics tracking and performance monitoring
+* 
 
 ## Recent Changes
 
@@ -29,6 +34,7 @@ whether in your own home or over the internet.
 ### USB Controller Improvements
 - ✨ **Persistent USB permissions** - USB controllers now retain authorization after first connection
 - 🎮 **Full Razer Kishi series support** - Added complete support for all Kishi models (original, V2, V2 Pro, Ultra)
+- 📳 **Enhanced vibration simulation** - Better rumble support with proper vibration capability detection for all connected controllers
 - 📱 Streamlined controller connection experience - Select "Use by default" once, never authorize again
 
 ### Keyboard Input Enhancement
