@@ -99,7 +99,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Only 2 touches are supported
     private final TouchContext[] touchContextMap = new TouchContext[2];
     private int maxPointerCountInGesture = 0;
-    private long gestureStartTime = 0;
 
     private static final int REFERENCE_HORIZ_RES = 1280;
     private static final int REFERENCE_VERT_RES = 720;
@@ -109,8 +108,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     private static final int STYLUS_UP_DEAD_ZONE_DELAY = 150;
     private static final int STYLUS_UP_DEAD_ZONE_RADIUS = 50;
-
-    private static final int THREE_FINGER_TAP_THRESHOLD = 800;
 
     private ControllerHandler controllerHandler;
     private KeyboardTranslator keyboardTranslator;
@@ -1500,46 +1497,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    private boolean handleMultiFingerTapGestures(MotionEvent event) {
-        // Only process multi-finger taps when touchscreen trackpad is enabled
-        if (!prefConfig.touchscreenTrackpad) {
-            return false;
-        }
-
-        // Check if all fingers are up (last finger lifting)
-        if (event.getPointerCount() != 1 || (event.getFlags() & MotionEvent.FLAG_CANCELED) != 0) {
-            return false;
-        }
-
-        long currentTime = event.getEventTime();
-        int maxFingers = maxPointerCountInGesture;
-
-        // Reset the max pointer count for next gesture
-        maxPointerCountInGesture = 0;
-
-        // Check if the gesture completed within the threshold time
-        if (currentTime - gestureStartTime > THREE_FINGER_TAP_THRESHOLD) {
-            gestureStartTime = 0;
-            return false;
-        }
-
-        gestureStartTime = 0;
-
-        // Check for 4 finger tap first (keyboard with input dialog)
-        if (maxFingers >= 4) {
-            showKeyboardWithInput();
-            return true;
-        }
-
-        // Check for 3 finger tap (toggle keyboard with special keys bar)
-        if (maxFingers >= 3) {
-            toggleKeyboard();
-            return true;
-        }
-
-        return false;
-    }
-
     @Override
     public void toggleKeyboard() {
         LimeLog.info("Toggling keyboard overlay with special keys bar");
@@ -2069,6 +2026,36 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             return false;
         }
 
+        // Handle multi-finger gestures early, before any other processing
+        // This ensures gesture detection works regardless of event source classification
+        if (prefConfig.touchscreenTrackpad &&
+            event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+            int actionMasked = event.getActionMasked();
+            int pointerCount = event.getPointerCount();
+
+            if (actionMasked == MotionEvent.ACTION_DOWN) {
+                // First finger down - start tracking the gesture
+                maxPointerCountInGesture = 1;
+            } else if (actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+                // Additional finger down - update max pointer count
+                if (pointerCount > maxPointerCountInGesture) {
+                    maxPointerCountInGesture = pointerCount;
+                }
+            } else if (actionMasked == MotionEvent.ACTION_UP && pointerCount == 1) {
+                // Last finger up - check for multi-finger gesture
+                int maxFingers = maxPointerCountInGesture;
+                maxPointerCountInGesture = 0;
+
+                if (maxFingers >= 4) {
+                    showKeyboardWithInput();
+                    return true;
+                } else if (maxFingers >= 3) {
+                    toggleKeyboard();
+                    return true;
+                }
+            }
+        }
+
         int eventSource = event.getSource();
         int deviceSources = event.getDevice() != null ? event.getDevice().getSources() : 0;
         if ((eventSource & InputDevice.SOURCE_CLASS_JOYSTICK) != 0) {
@@ -2272,40 +2259,17 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 int eventX = (int) (event.getX(actionIndex) + xOffset);
                 int eventY = (int) (event.getY(actionIndex) + yOffset);
 
-                // Special handling for multi-finger gestures (only when touchscreen trackpad is enabled)
-                if (prefConfig.touchscreenTrackpad) {
-                    int actionMasked = event.getActionMasked();
-                    int pointerCount = event.getPointerCount();
-
-                    if (actionMasked == MotionEvent.ACTION_DOWN) {
-                        // First finger down - start tracking the gesture
-                        maxPointerCountInGesture = 1;
-                        gestureStartTime = event.getEventTime();
-                    } else if (actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
-                        // Additional finger down - update max pointer count
-                        if (pointerCount > maxPointerCountInGesture) {
-                            maxPointerCountInGesture = pointerCount;
-                        }
-
-                        if (pointerCount >= 3) {
-                            // Three or more fingers down - cancel normal touch processing
-                            cancelAllTouches();
-                            return true;
-                        }
-                    }
+                // Cancel touches when 3+ fingers are detected (multi-finger gestures are handled at the start of handleMotionEvent)
+                if (prefConfig.touchscreenTrackpad &&
+                    event.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN &&
+                    event.getPointerCount() >= 3) {
+                    cancelAllTouches();
+                    return true;
                 }
 
                 if (!prefConfig.touchscreenTrackpad && trySendTouchEvent(view, event)) {
                     // If this host supports touch events and absolute touch is enabled,
                     // send it directly as a touch event.
-                    return true;
-                }
-
-                // Check for multi-finger tap gestures on finger up (before context null check,
-                // since 3+ finger gestures won't have a valid TouchContext)
-                if ((event.getActionMasked() == MotionEvent.ACTION_POINTER_UP ||
-                        event.getActionMasked() == MotionEvent.ACTION_UP) &&
-                        handleMultiFingerTapGestures(event)) {
                     return true;
                 }
 
