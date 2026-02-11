@@ -98,8 +98,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     // Only 2 touches are supported
     private final TouchContext[] touchContextMap = new TouchContext[2];
-    private long threeFingerDownTime = 0;
-    private long fourFingerDownTime = 0;
+    private int maxPointerCountInGesture = 0;
+    private long gestureStartTime = 0;
 
     private static final int REFERENCE_HORIZ_RES = 1280;
     private static final int REFERENCE_VERT_RES = 720;
@@ -110,8 +110,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private static final int STYLUS_UP_DEAD_ZONE_DELAY = 150;
     private static final int STYLUS_UP_DEAD_ZONE_RADIUS = 50;
 
-    private static final int THREE_FINGER_TAP_THRESHOLD = 300;
-    private static final int FOUR_FINGER_TAP_THRESHOLD = 300;
+    private static final int THREE_FINGER_TAP_THRESHOLD = 500;
 
     private ControllerHandler controllerHandler;
     private KeyboardTranslator keyboardTranslator;
@@ -1513,21 +1512,27 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
 
         long currentTime = event.getEventTime();
+        int maxFingers = maxPointerCountInGesture;
+
+        // Reset the max pointer count for next gesture
+        maxPointerCountInGesture = 0;
+
+        // Check if the gesture completed within the threshold time
+        if (currentTime - gestureStartTime > THREE_FINGER_TAP_THRESHOLD) {
+            gestureStartTime = 0;
+            return false;
+        }
+
+        gestureStartTime = 0;
 
         // Check for 4 finger tap first (keyboard with input dialog)
-        if (currentTime - fourFingerDownTime < FOUR_FINGER_TAP_THRESHOLD) {
-            // Reset timestamps to prevent duplicate triggers
-            fourFingerDownTime = 0;
-            threeFingerDownTime = 0;
+        if (maxFingers >= 4) {
             showKeyboardWithInput();
             return true;
         }
 
         // Check for 3 finger tap (toggle keyboard with special keys bar)
-        if (currentTime - threeFingerDownTime < THREE_FINGER_TAP_THRESHOLD) {
-            // Reset timestamps to prevent duplicate triggers
-            threeFingerDownTime = 0;
-            fourFingerDownTime = 0;
+        if (maxFingers >= 3) {
             toggleKeyboard();
             return true;
         }
@@ -2270,14 +2275,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 // Special handling for multi-finger gestures (only when touchscreen trackpad is enabled)
                 if (prefConfig.touchscreenTrackpad && event.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN) {
                     int pointerCount = event.getPointerCount();
-                    if (pointerCount == 3) {
-                        // Three fingers down
-                        threeFingerDownTime = event.getEventTime();
-                        cancelAllTouches();
-                        return true;
-                    } else if (pointerCount == 4) {
-                        // Four fingers down
-                        fourFingerDownTime = event.getEventTime();
+
+                    // Track the maximum pointer count during this gesture
+                    if (pointerCount > maxPointerCountInGesture) {
+                        maxPointerCountInGesture = pointerCount;
+                        gestureStartTime = event.getEventTime();
+                    }
+
+                    if (pointerCount >= 3) {
+                        // Three or more fingers down - cancel normal touch processing
                         cancelAllTouches();
                         return true;
                     }
