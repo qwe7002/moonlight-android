@@ -110,15 +110,16 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
                 GamepadInfo info = createGamepadInfo(device);
                 detectedGamepads.add(info);
 
-                // Store vibrator info only if the device has vibration support
+                // Store vibrator info only if the device has real gamepad vibration support
+                // (dual or quad vibrators through VibratorManager)
+                // We don't use single vibrator fallback because it may reference the device vibrator
                 VibratorInfo vibratorInfo = new VibratorInfo();
                 vibratorInfo.deviceId = deviceId;
                 vibratorInfo.vibratorManager = device.getVibratorManager();
-                vibratorInfo.vibrator = device.getVibrator();
-                vibratorInfo.hasVibrator = device.getVibrator().hasVibrator();
                 vibratorInfo.hasQuadVibrators = ControllerHandler.hasQuadAmplitudeControlledRumbleVibrators(device.getVibratorManager());
                 vibratorInfo.hasDualVibrators = ControllerHandler.hasDualAmplitudeControlledRumbleVibrators(device.getVibratorManager());
-                if (vibratorInfo.hasVibrator) {
+                // Only add gamepads with actual gamepad vibration (dual or quad motors)
+                if (vibratorInfo.hasQuadVibrators || vibratorInfo.hasDualVibrators) {
                     gamepadVibrators.add(vibratorInfo);
                 }
             }
@@ -175,9 +176,6 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
         info.productId = device.getProductId();
         info.isExternal = device.isExternal();
 
-        // Determine controller type
-        info.controllerType = getControllerTypeName(
-                MoonBridge.guessControllerType(info.vendorId, info.productId));
 
         // Determine protocol (XInput vs HID)
         info.protocol = determineProtocol(device, info.vendorId, info.productId);
@@ -210,9 +208,6 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
         info.isExternal = true;
         info.isUsbDevice = true;
 
-        // Determine controller type
-        info.controllerType = getControllerTypeName(
-                MoonBridge.guessControllerType(info.vendorId, info.productId));
 
         // USB devices using our driver are typically XInput-compatible
         info.protocol = getString(R.string.gamepad_test_protocol_usb_driver);
@@ -224,18 +219,6 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
         return info;
     }
 
-    private String getControllerTypeName(byte type) {
-        switch (type) {
-            case MoonBridge.LI_CTYPE_XBOX:
-                return getString(R.string.gamepad_test_type_xbox);
-            case MoonBridge.LI_CTYPE_PS:
-                return getString(R.string.gamepad_test_type_playstation);
-            case MoonBridge.LI_CTYPE_NINTENDO:
-                return getString(R.string.gamepad_test_type_nintendo);
-            default:
-                return getString(R.string.gamepad_test_type_unknown);
-        }
-    }
 
     private String determineProtocol(InputDevice device, int vendorId, int productId) {
         String deviceName = device.getName().toLowerCase();
@@ -281,14 +264,12 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
 
     private void populateGamepadView(View view, GamepadInfo info) {
         TextView nameView = view.findViewById(R.id.gamepad_name);
-        TextView typeView = view.findViewById(R.id.gamepad_type);
         TextView protocolView = view.findViewById(R.id.gamepad_protocol);
         TextView vendorProductView = view.findViewById(R.id.gamepad_vendor_product);
         TextView capabilitiesView = view.findViewById(R.id.gamepad_capabilities);
         TextView vibrationView = view.findViewById(R.id.gamepad_vibration_support);
 
         nameView.setText(info.name);
-        typeView.setText(getString(R.string.gamepad_test_controller_type, info.controllerType));
         protocolView.setText(getString(R.string.gamepad_test_protocol_label, info.protocol));
         vendorProductView.setText(getString(R.string.gamepad_test_vendor_product,
                 String.format("0x%04X", info.vendorId),
@@ -340,13 +321,6 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
                         lowFreq ? (short)32767 : 0,
                         highFreq ? (short)32767 : 0);
                 gamepadVibrated = true;
-            } else if (vibratorInfo.vibrator != null && vibratorInfo.vibrator.hasVibrator()) {
-                // Use waveform to simulate different motor types on single-motor devices
-                // Don't simulate trigger vibration on single-motor devices
-                if (!leftTrigger && !rightTrigger) {
-                    vibrateSingleMotorSimulation(vibratorInfo.vibrator, lowFreq, highFreq);
-                    gamepadVibrated = true;
-                }
             }
         }
 
@@ -393,9 +367,6 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
             if (vibratorInfo.vibratorManager != null) {
                 vibratorInfo.vibratorManager.cancel();
             }
-            if (vibratorInfo.vibrator != null) {
-                vibratorInfo.vibrator.cancel();
-            }
         }
 
         // Also cancel device vibrator
@@ -430,7 +401,6 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
         int productId;
         boolean isExternal;
         boolean isUsbDevice;
-        String controllerType;
         String protocol;
         boolean hasVibration;
         boolean hasAmplitudeControl;
@@ -445,8 +415,6 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
     private static class VibratorInfo {
         int deviceId;
         VibratorManager vibratorManager;
-        Vibrator vibrator;
-        boolean hasVibrator;
         boolean hasQuadVibrators;
         boolean hasDualVibrators;
     }
