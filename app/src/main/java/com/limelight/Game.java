@@ -397,9 +397,12 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         // Acquire a WakeLock to prevent the device from sleeping during streaming
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        // We use the deprecated SCREEN_BRIGHT_WAKE_LOCK flag here because it allows the screen to turn on at full brightness immediately when a stream starts, which is important for a good user experience. The newer PARTIAL_WAKE_LOCK doesn't guarantee the screen will turn on right away, which can lead to confusion for users when they start a stream and the screen stays off for several seconds until the system eventually turns it on. Since this wake lock is only held while streaming and is released immediately when streaming stops, the power impact should be minimal.
+        //noinspection deprecation
         wakeLock = powerManager.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "Moonlight:Streaming");
         wakeLock.setReferenceCounted(false);
         wakeLock.acquire();
+
 
         appName = Game.this.getIntent().getStringExtra(EXTRA_APP_NAME);
         pcName = Game.this.getIntent().getStringExtra(EXTRA_PC_NAME);
@@ -2033,26 +2036,58 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             int actionMasked = event.getActionMasked();
             int pointerCount = event.getPointerCount();
 
-            if (actionMasked == MotionEvent.ACTION_DOWN) {
-                // First finger down - start tracking the gesture
-                maxPointerCountInGesture = 1;
-            } else if (actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
-                // Additional finger down - update max pointer count
-                if (pointerCount > maxPointerCountInGesture) {
-                    maxPointerCountInGesture = pointerCount;
-                }
-            } else if (actionMasked == MotionEvent.ACTION_UP && pointerCount == 1) {
-                // Last finger up - check for multi-finger gesture
-                int maxFingers = maxPointerCountInGesture;
-                maxPointerCountInGesture = 0;
+            switch (actionMasked) {
+                case MotionEvent.ACTION_DOWN:
+                    // First finger down - start tracking the gesture
+                    maxPointerCountInGesture = 1;
+                    break;
 
-                if (maxFingers >= 4) {
-                    showKeyboardWithInput();
-                    return true;
-                } else if (maxFingers >= 3) {
-                    toggleKeyboard();
-                    return true;
-                }
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    // Additional finger down - update max pointer count
+                    if (pointerCount > maxPointerCountInGesture) {
+                        maxPointerCountInGesture = pointerCount;
+                    }
+                    break;
+
+                case MotionEvent.ACTION_POINTER_UP:
+                    // A finger lifted but others remain - check if we should trigger gesture
+                    // This helps on tablets where fingers may not lift simultaneously
+                    if (maxPointerCountInGesture >= 3 && pointerCount == 2) {
+                        // Transitioning from 3+ fingers to 2 fingers
+                        // Trigger the gesture now for better responsiveness
+                        int maxFingers = maxPointerCountInGesture;
+                        maxPointerCountInGesture = pointerCount - 1; // Will be 1 after this UP
+
+                        if (maxFingers >= 4) {
+                            showKeyboardWithInput();
+                        } else {
+                            // maxFingers is 3 (we already checked >= 3 above)
+                            toggleKeyboard();
+                        }
+                        return true;
+                    }
+                    break;
+
+                case MotionEvent.ACTION_UP:
+                    // Last finger up - check for multi-finger gesture
+                    if (pointerCount == 1) {
+                        int maxFingers = maxPointerCountInGesture;
+                        maxPointerCountInGesture = 0;
+
+                        if (maxFingers >= 4) {
+                            showKeyboardWithInput();
+                            return true;
+                        } else if (maxFingers >= 3) {
+                            toggleKeyboard();
+                            return true;
+                        }
+                    }
+                    break;
+
+                case MotionEvent.ACTION_CANCEL:
+                    // Touch was cancelled - reset tracking
+                    maxPointerCountInGesture = 0;
+                    break;
             }
         }
 
