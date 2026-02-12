@@ -410,7 +410,6 @@ pub extern "C" fn PltDestroyHmacSha256Context(ctx: *mut std::ffi::c_void) {
 
 /// HMAC-SHA256 sign
 #[no_mangle]
-#[inline]
 pub extern "C" fn PltSignHmacSha256(
     ctx: *mut std::ffi::c_void,
     data: *const u8,
