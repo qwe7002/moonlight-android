@@ -1,137 +1,313 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp"
+    android:fillViewport="true"
     tools:context=".preferences.GamepadTestActivity">
-
-    <TextView
-        android:id="@+id/gamepad_header"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/gamepad_test_title"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="16dp" />
-
-    <TextView
-        android:id="@+id/gamepad_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/gamepad_test_no_gamepad"
-        android:textSize="16sp"
-        android:layout_marginBottom="16dp" />
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
-
-        <LinearLayout
-            android:id="@+id/gamepad_list_container"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical" />
-
-    </ScrollView>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:layout_marginTop="16dp">
+        android:padding="12dp">
+
+        <!-- Header row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:id="@+id/gamepad_header"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/gamepad_test_title"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btn_refresh"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/gamepad_test_refresh"
+                android:textSize="12sp" />
+
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/vibration_test_header"
+            android:id="@+id/gamepad_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/gamepad_test_vibration_section"
-            android:textSize="18sp"
-            android:textStyle="bold"
+            android:text="@string/gamepad_test_no_gamepad"
+            android:textSize="12sp"
             android:layout_marginBottom="8dp" />
 
+        <!-- Gamepad list -->
+        <LinearLayout
+            android:id="@+id/gamepad_list_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Two-column layout for landscape -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
+            android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/btn_vibrate_low"
+            <!-- Left column: Quick test buttons -->
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/gamepad_test_vibrate_low"
-                android:layout_marginEnd="4dp" />
+                android:orientation="vertical"
+                android:layout_marginEnd="8dp">
 
-            <Button
-                android:id="@+id/btn_vibrate_high"
+                <TextView
+                    android:id="@+id/vibration_test_header"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/gamepad_test_vibration_section"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
+
+                <!-- Motor buttons row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="4dp">
+
+                    <Button
+                        android:id="@+id/btn_vibrate_low"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/gamepad_test_vibrate_low"
+                        android:textSize="11sp"
+                        android:layout_marginEnd="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_vibrate_high"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/gamepad_test_vibrate_high"
+                        android:textSize="11sp"
+                        android:layout_marginStart="2dp" />
+
+                </LinearLayout>
+
+                <!-- Both/Stop row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="4dp">
+
+                    <Button
+                        android:id="@+id/btn_vibrate_both"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/gamepad_test_vibrate_both"
+                        android:textSize="11sp"
+                        android:layout_marginEnd="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_vibrate_stop"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/gamepad_test_vibrate_stop"
+                        android:textSize="11sp"
+                        android:layout_marginStart="2dp" />
+
+                </LinearLayout>
+
+                <!-- Trigger buttons row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btn_vibrate_trigger_left"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/gamepad_test_vibrate_trigger_left"
+                        android:textSize="10sp"
+                        android:layout_marginEnd="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_vibrate_trigger_right"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/gamepad_test_vibrate_trigger_right"
+                        android:textSize="10sp"
+                        android:layout_marginStart="2dp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Right column: XInput sliders -->
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/gamepad_test_vibrate_high"
-                android:layout_marginStart="4dp" />
+                android:orientation="vertical"
+                android:layout_marginStart="8dp">
 
-        </LinearLayout>
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/gamepad_test_xinput_section"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
+                <!-- Left Motor slider -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="2dp">
 
-            <Button
-                android:id="@+id/btn_vibrate_both"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/gamepad_test_vibrate_both"
-                android:layout_marginEnd="4dp" />
+                    <TextView
+                        android:layout_width="90dp"
+                        android:layout_height="wrap_content"
+                        android:text="@string/gamepad_test_left_motor"
+                        android:textSize="11sp" />
 
-            <Button
-                android:id="@+id/btn_vibrate_stop"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/gamepad_test_vibrate_stop"
-                android:layout_marginStart="4dp" />
+                    <SeekBar
+                        android:id="@+id/seekbar_left_motor"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1" />
 
-        </LinearLayout>
+                    <TextView
+                        android:id="@+id/text_left_motor_value"
+                        android:layout_width="60dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:textSize="10sp"
+                        android:text="0%" />
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
+                </LinearLayout>
 
-            <Button
-                android:id="@+id/btn_vibrate_trigger_left"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/gamepad_test_vibrate_trigger_left"
-                android:layout_marginEnd="4dp" />
+                <!-- Right Motor slider -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="2dp">
 
-            <Button
-                android:id="@+id/btn_vibrate_trigger_right"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/gamepad_test_vibrate_trigger_right"
-                android:layout_marginStart="4dp" />
+                    <TextView
+                        android:layout_width="90dp"
+                        android:layout_height="wrap_content"
+                        android:text="@string/gamepad_test_right_motor"
+                        android:textSize="11sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekbar_right_motor"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/text_right_motor_value"
+                        android:layout_width="60dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:textSize="10sp"
+                        android:text="0%" />
+
+                </LinearLayout>
+
+                <!-- Left Trigger slider -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="2dp">
+
+                    <TextView
+                        android:layout_width="90dp"
+                        android:layout_height="wrap_content"
+                        android:text="@string/gamepad_test_left_trigger"
+                        android:textSize="11sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekbar_left_trigger"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/text_left_trigger_value"
+                        android:layout_width="60dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:textSize="10sp"
+                        android:text="0%" />
+
+                </LinearLayout>
+
+                <!-- Right Trigger slider -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="4dp">
+
+                    <TextView
+                        android:layout_width="90dp"
+                        android:layout_height="wrap_content"
+                        android:text="@string/gamepad_test_right_trigger"
+                        android:textSize="11sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekbar_right_trigger"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/text_right_trigger_value"
+                        android:layout_width="60dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:textSize="10sp"
+                        android:text="0%" />
+
+                </LinearLayout>
+
+                <!-- Custom vibration button -->
+                <Button
+                    android:id="@+id/btn_vibrate_custom"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/gamepad_test_vibrate_custom"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
 
         </LinearLayout>
 
     </LinearLayout>
 
-    <Button
-        android:id="@+id/btn_refresh"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/gamepad_test_refresh"
-        android:layout_marginTop="8dp" />
-
-</LinearLayout>
+</ScrollView>
 

@@ -5,6 +5,8 @@ import android.hardware.input.InputManager;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
@@ -13,6 +15,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -30,6 +33,11 @@ import java.util.List;
  * Activity for testing connected gamepads.
  * Displays gamepad information including type (Xbox, PlayStation, Nintendo, etc.),
  * protocol (XInput/HID), and allows testing vibration functionality.
+ *
+ * XInput Motor Specifications:
+ * - Left motor (wLeftMotorSpeed): 0-65535, heavy eccentric mass (~40g), ~20-30Hz
+ * - Right motor (wRightMotorSpeed): 0-65535, light eccentric mass (~10g), ~100-150Hz
+ * - Left/Right triggers (Xbox One+): 0-65535, linear resonant actuators
  */
 public class GamepadTestActivity extends AppCompatActivity implements InputManager.InputDeviceListener {
 
@@ -40,6 +48,25 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
 
     // Store vibrators for each gamepad to use for rumble testing
     private final List<VibratorInfo> gamepadVibrators = new ArrayList<>();
+
+    // XInput intensity sliders (0-65535 range, displayed as 0-100%)
+    private SeekBar seekBarLeftMotor;
+    private SeekBar seekBarRightMotor;
+    private SeekBar seekBarLeftTrigger;
+    private SeekBar seekBarRightTrigger;
+    private TextView textLeftMotorValue;
+    private TextView textRightMotorValue;
+    private TextView textLeftTriggerValue;
+    private TextView textRightTriggerValue;
+
+    // Continuous vibration handler
+    private Handler vibrationHandler;
+    private Runnable vibrationRunnable;
+    private boolean isVibrating = false;
+
+    // XInput constants
+    private static final int XINPUT_MAX_VALUE = 65535;
+    private static final int SLIDER_MAX = 100;  // Slider shows percentage
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,6 +82,12 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
         gamepadStatus = findViewById(R.id.gamepad_status);
 
         inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
+
+        // Initialize vibration handler for continuous updates
+        vibrationHandler = new Handler(Looper.getMainLooper());
+
+        // Setup XInput intensity sliders
+        setupXInputSliders();
 
         // Setup button listeners
         setupVibrationButtons();
@@ -78,7 +111,104 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
     protected void onPause() {
         super.onPause();
         inputManager.unregisterInputDeviceListener(this);
+        stopContinuousVibration();
         stopAllVibration();
+    }
+
+    /**
+     * Setup XInput-compatible intensity sliders for precise motor control.
+     * Each slider represents 0-100% of the XInput 0-65535 range.
+     */
+    private void setupXInputSliders() {
+        // Left motor (low frequency) slider
+        seekBarLeftMotor = findViewById(R.id.seekbar_left_motor);
+        textLeftMotorValue = findViewById(R.id.text_left_motor_value);
+
+        // Right motor (high frequency) slider
+        seekBarRightMotor = findViewById(R.id.seekbar_right_motor);
+        textRightMotorValue = findViewById(R.id.text_right_motor_value);
+
+        // Left trigger slider
+        seekBarLeftTrigger = findViewById(R.id.seekbar_left_trigger);
+        textLeftTriggerValue = findViewById(R.id.text_left_trigger_value);
+
+        // Right trigger slider
+        seekBarRightTrigger = findViewById(R.id.seekbar_right_trigger);
+        textRightTriggerValue = findViewById(R.id.text_right_trigger_value);
+
+        // Setup listeners for real-time value display
+        SeekBar.OnSeekBarChangeListener sliderListener = new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                updateSliderValueDisplay();
+                if (fromUser && isVibrating) {
+                    // Update vibration in real-time when sliders change
+                    applyCurrentSliderVibration();
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        };
+
+        if (seekBarLeftMotor != null) {
+            seekBarLeftMotor.setMax(SLIDER_MAX);
+            seekBarLeftMotor.setOnSeekBarChangeListener(sliderListener);
+        }
+        if (seekBarRightMotor != null) {
+            seekBarRightMotor.setMax(SLIDER_MAX);
+            seekBarRightMotor.setOnSeekBarChangeListener(sliderListener);
+        }
+        if (seekBarLeftTrigger != null) {
+            seekBarLeftTrigger.setMax(SLIDER_MAX);
+            seekBarLeftTrigger.setOnSeekBarChangeListener(sliderListener);
+        }
+        if (seekBarRightTrigger != null) {
+            seekBarRightTrigger.setMax(SLIDER_MAX);
+            seekBarRightTrigger.setOnSeekBarChangeListener(sliderListener);
+        }
+
+        updateSliderValueDisplay();
+    }
+
+    /**
+     * Updates the text displays showing current XInput values.
+     */
+    private void updateSliderValueDisplay() {
+        if (textLeftMotorValue != null && seekBarLeftMotor != null) {
+            int xinputValue = percentToXInput(seekBarLeftMotor.getProgress());
+            textLeftMotorValue.setText(String.format("%d%% (%d)", seekBarLeftMotor.getProgress(), xinputValue));
+        }
+        if (textRightMotorValue != null && seekBarRightMotor != null) {
+            int xinputValue = percentToXInput(seekBarRightMotor.getProgress());
+            textRightMotorValue.setText(String.format("%d%% (%d)", seekBarRightMotor.getProgress(), xinputValue));
+        }
+        if (textLeftTriggerValue != null && seekBarLeftTrigger != null) {
+            int xinputValue = percentToXInput(seekBarLeftTrigger.getProgress());
+            textLeftTriggerValue.setText(String.format("%d%% (%d)", seekBarLeftTrigger.getProgress(), xinputValue));
+        }
+        if (textRightTriggerValue != null && seekBarRightTrigger != null) {
+            int xinputValue = percentToXInput(seekBarRightTrigger.getProgress());
+            textRightTriggerValue.setText(String.format("%d%% (%d)", seekBarRightTrigger.getProgress(), xinputValue));
+        }
+    }
+
+    /**
+     * Converts percentage (0-100) to XInput value (0-65535).
+     */
+    private int percentToXInput(int percent) {
+        return (int) ((percent / 100.0) * XINPUT_MAX_VALUE);
+    }
+
+    /**
+     * Converts XInput value (0-65535) to short for rumble APIs.
+     */
+    private short xinputToShort(int xinputValue) {
+        // XInput uses 0-65535, our APIs use signed short
+        return (short) Math.min(xinputValue, 0x7FFF * 2);
     }
 
     private void setupVibrationButtons() {
@@ -89,12 +219,98 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
         Button btnVibrateTriggerLeft = findViewById(R.id.btn_vibrate_trigger_left);
         Button btnVibrateTriggerRight = findViewById(R.id.btn_vibrate_trigger_right);
 
+        // Quick test buttons use 50% intensity
         btnVibrateLow.setOnClickListener(v -> testVibration(true, false, false, false));
         btnVibrateHigh.setOnClickListener(v -> testVibration(false, true, false, false));
         btnVibrateBoth.setOnClickListener(v -> testVibration(true, true, false, false));
-        btnVibrateStop.setOnClickListener(v -> stopAllVibration());
+        btnVibrateStop.setOnClickListener(v -> {
+            stopContinuousVibration();
+            stopAllVibration();
+        });
         btnVibrateTriggerLeft.setOnClickListener(v -> testVibration(false, false, true, false));
         btnVibrateTriggerRight.setOnClickListener(v -> testVibration(false, false, false, true));
+
+        // Custom intensity test button (uses slider values)
+        Button btnVibrateCustom = findViewById(R.id.btn_vibrate_custom);
+        if (btnVibrateCustom != null) {
+            btnVibrateCustom.setOnClickListener(v -> startContinuousVibration());
+        }
+    }
+
+    /**
+     * Starts continuous vibration using the current slider values.
+     * The vibration will update every 100ms to maintain the effect.
+     */
+    private void startContinuousVibration() {
+        isVibrating = true;
+
+        // Create runnable for continuous vibration
+        vibrationRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (isVibrating) {
+                    applyCurrentSliderVibration();
+                    // Re-apply vibration every 100ms to maintain continuous effect
+                    vibrationHandler.postDelayed(this, 100);
+                }
+            }
+        };
+
+        // Start immediately
+        vibrationHandler.post(vibrationRunnable);
+    }
+
+    /**
+     * Stops continuous vibration.
+     */
+    private void stopContinuousVibration() {
+        isVibrating = false;
+        if (vibrationRunnable != null) {
+            vibrationHandler.removeCallbacks(vibrationRunnable);
+            vibrationRunnable = null;
+        }
+    }
+
+    /**
+     * Applies vibration based on current slider values.
+     * This method directly uses XInput-compatible values.
+     */
+    private void applyCurrentSliderVibration() {
+        int leftMotorXInput = seekBarLeftMotor != null ? percentToXInput(seekBarLeftMotor.getProgress()) : 0;
+        int rightMotorXInput = seekBarRightMotor != null ? percentToXInput(seekBarRightMotor.getProgress()) : 0;
+        int leftTriggerXInput = seekBarLeftTrigger != null ? percentToXInput(seekBarLeftTrigger.getProgress()) : 0;
+        int rightTriggerXInput = seekBarRightTrigger != null ? percentToXInput(seekBarRightTrigger.getProgress()) : 0;
+
+        // Convert to shorts for API calls
+        short leftMotor = xinputToShort(leftMotorXInput);
+        short rightMotor = xinputToShort(rightMotorXInput);
+        short leftTrigger = xinputToShort(leftTriggerXInput);
+        short rightTrigger = xinputToShort(rightTriggerXInput);
+
+        boolean gamepadVibrated = false;
+
+        for (VibratorInfo vibratorInfo : gamepadVibrators) {
+            if (vibratorInfo.hasQuadVibrators && vibratorInfo.vibratorManager != null) {
+                ControllerHandler.rumbleQuadVibrators(vibratorInfo.vibratorManager,
+                        leftMotor, rightMotor, leftTrigger, rightTrigger);
+                gamepadVibrated = true;
+            } else if (vibratorInfo.hasDualVibrators && vibratorInfo.vibratorManager != null) {
+                ControllerHandler.rumbleDualVibrators(vibratorInfo.vibratorManager,
+                        leftMotor, rightMotor);
+                gamepadVibrated = true;
+            }
+        }
+
+        // Fallback to device vibrator for motor simulation
+        if (!gamepadVibrated && (leftMotorXInput > 0 || rightMotorXInput > 0)) {
+            Vibrator deviceVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (deviceVibrator != null && deviceVibrator.hasVibrator()) {
+                // Use XInput values converted to 0-255 range for waveform
+                int lowFreqAmplitude = (leftMotorXInput * 255) / XINPUT_MAX_VALUE;
+                int highFreqAmplitude = (rightMotorXInput * 255) / XINPUT_MAX_VALUE;
+                vibrateSingleMotorSimulation(deviceVibrator, lowFreqAmplitude, highFreqAmplitude);
+            }
+        }
     }
 
     private void refreshGamepadList() {
@@ -306,21 +522,27 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
         vibrationView.setText(getString(R.string.gamepad_test_vibration_label, vibration.toString()));
     }
 
+    /**
+     * Quick test vibration for button presses (uses 50% intensity).
+     */
     private void testVibration(boolean lowFreq, boolean highFreq, boolean leftTrigger, boolean rightTrigger) {
         boolean gamepadVibrated = false;
+
+        // 50% intensity = 32767 (half of 65535)
+        short halfIntensity = (short) 32767;
 
         for (VibratorInfo vibratorInfo : gamepadVibrators) {
             if (vibratorInfo.hasQuadVibrators && vibratorInfo.vibratorManager != null) {
                 ControllerHandler.rumbleQuadVibrators(vibratorInfo.vibratorManager,
-                        lowFreq ? (short)32767 : 0,
-                        highFreq ? (short)32767 : 0,
-                        leftTrigger ? (short)32767 : 0,
-                        rightTrigger ? (short)32767 : 0);
+                        lowFreq ? halfIntensity : 0,
+                        highFreq ? halfIntensity : 0,
+                        leftTrigger ? halfIntensity : 0,
+                        rightTrigger ? halfIntensity : 0);
                 gamepadVibrated = true;
             } else if (vibratorInfo.hasDualVibrators && vibratorInfo.vibratorManager != null) {
                 ControllerHandler.rumbleDualVibrators(vibratorInfo.vibratorManager,
-                        lowFreq ? (short)32767 : 0,
-                        highFreq ? (short)32767 : 0);
+                        lowFreq ? halfIntensity : 0,
+                        highFreq ? halfIntensity : 0);
                 gamepadVibrated = true;
             }
         }
@@ -330,38 +552,51 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
         if (!gamepadVibrated && !leftTrigger && !rightTrigger) {
             Vibrator deviceVibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
             if (deviceVibrator != null && deviceVibrator.hasVibrator() && (lowFreq || highFreq)) {
-                vibrateSingleMotorSimulation(deviceVibrator, lowFreq, highFreq);
+                // Use 128 (50% of 255) for half intensity
+                int lowFreqAmplitude = lowFreq ? 128 : 0;
+                int highFreqAmplitude = highFreq ? 128 : 0;
+                vibrateSingleMotorSimulation(deviceVibrator, lowFreqAmplitude, highFreqAmplitude);
             }
         }
     }
 
     /**
      * Simulates dual-motor vibration on a single-motor device using waveforms.
-     * Requires amplitude control - devices without it cannot properly simulate dual-motor vibration.
-     * Low frequency: Long, slow pulses - deep rumble
-     * High frequency: Short, rapid pulses - sharp buzz
-     * Both: Combined pattern that alternates between both feels
+     * Uses XInput-accurate frequencies for precise motor simulation.
+     *
+     * XInput specifications:
+     * - Left motor (lowFreq): ~20-30Hz, heavy eccentric mass
+     * - Right motor (highFreq): ~100-150Hz, light eccentric mass
+     *
+     * @param vibrator The device vibrator to use
+     * @param lowFreqAmplitude Low frequency motor amplitude (0-255)
+     * @param highFreqAmplitude High frequency motor amplitude (0-255)
      */
-    private void vibrateSingleMotorSimulation(Vibrator vibrator, boolean lowFreq, boolean highFreq) {
-        if (!lowFreq && !highFreq) {
+    private void vibrateSingleMotorSimulation(Vibrator vibrator, int lowFreqAmplitude, int highFreqAmplitude) {
+        if (lowFreqAmplitude == 0 && highFreqAmplitude == 0) {
             vibrator.cancel();
             return;
         }
 
         // Require amplitude control for proper simulation
         if (!vibrator.hasAmplitudeControl()) {
+            // Fallback for devices without amplitude control
+            if (lowFreqAmplitude > 30 || highFreqAmplitude > 30) {
+                VibrationEffect effect = VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE);
+                vibrator.vibrate(effect);
+            }
             return;
         }
-
-        // Use 255 as max amplitude for the active motors
-        int lowFreqAmplitude = lowFreq ? 255 : 0;
-        int highFreqAmplitude = highFreq ? 255 : 0;
 
         VibrationEffect effect = ControllerHandler.createDualMotorWaveformEffect(lowFreqAmplitude, highFreqAmplitude);
         if (effect != null) {
             vibrator.vibrate(effect);
         }
     }
+
+    /**
+     * Quick test vibration for button presses (uses 50% intensity).
+     */
 
     private void stopAllVibration() {
         for (VibratorInfo vibratorInfo : gamepadVibrators) {

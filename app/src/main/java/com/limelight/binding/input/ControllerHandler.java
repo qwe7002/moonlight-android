@@ -1944,19 +1944,23 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
     /**
      * Creates a more precise waveform that simulates dual motor vibration
      * by using psychoacoustic principles to mimic the characteristics of
-     * low and high frequency motors.
+     * XInput's low and high frequency motors.
      *
-     * Low frequency motor (~130Hz):
+     * XInput motor specifications (Xbox 360/One controller):
+     * Left motor (wLeftMotorSpeed) - Low frequency:
+     * - Heavy eccentric mass (~40g), slow rotation (~20-30Hz)
      * - Produces deep, heavy rumbling sensation
-     * - Uses longer pulses (80-120ms) with gradual attack/decay
-     * - Lower amplitude modulation frequency for "throbbing" feel
+     * - Creates "throbbing" or "pounding" effect
      * - Typical in explosions, engine rumbles, heavy impacts
      *
-     * High frequency motor (~200Hz+):
+     * Right motor (wRightMotorSpeed) - High frequency:
+     * - Light eccentric mass (~10g), fast rotation (~100-150Hz)
      * - Produces sharp, buzzing sensation
-     * - Uses shorter, rapid pulses (20-40ms)
-     * - Higher amplitude modulation frequency for "buzzing" feel
+     * - Creates "buzzing" or "tingling" effect
      * - Typical in gunfire, light hits, surface vibrations
+     *
+     * Note: Since Android vibrators cannot directly control frequency,
+     * we simulate the perceptual difference through amplitude modulation patterns.
      */
     public static VibrationEffect createDualMotorWaveformEffect(int lowFreqAmplitude, int highFreqAmplitude) {
         // Calculate effective amplitudes (0-255 range)
@@ -1968,124 +1972,89 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             return null;
         }
 
-        // Calculate intensity factors
+        // Calculate intensity factors (0.0-1.0)
         float lowIntensity = effectiveLowFreq / 255.0f;
         float highIntensity = effectiveHighFreq / 255.0f;
 
         if (effectiveLowFreq > 0 && effectiveHighFreq > 0) {
-            // Both motors active: create a sophisticated pattern that combines
-            // the characteristics of both motor types
+            // Both motors active: combine slow pulses (low freq) with continuous buzz (high freq)
+            // The pattern alternates between:
+            // - Combined strong pulse (both motors)
+            // - High-freq only buzz (during low-freq pause)
 
-            // Create a compound waveform that interleaves both motor characteristics
-            // Pattern: [low pulse] [gap] [high bursts] [gap] repeat
-            int numCycles = 3;
-            int segmentsPerCycle = 8;
-            int totalSegments = numCycles * segmentsPerCycle;
+            int numSegments = 6;
+            long[] timings = new long[numSegments];
+            int[] amplitudes = new int[numSegments];
 
-            long[] timings = new long[totalSegments];
-            int[] amplitudes = new int[totalSegments];
+            // Calculate combined amplitude (high freq provides baseline, low freq adds peaks)
+            int baseAmplitude = (int)(effectiveHighFreq * 0.7f);  // Continuous high-freq buzz
+            int peakAmplitude = Math.min(255, effectiveLowFreq + (int)(effectiveHighFreq * 0.5f));
 
-            for (int cycle = 0; cycle < numCycles; cycle++) {
-                int baseIdx = cycle * segmentsPerCycle;
+            // Timing based on low-freq rhythm with high-freq fill
+            int peakDuration = 120 + (int)(80 * lowIntensity);  // Strong combined pulse
+            int buzzDuration = 60 + (int)(40 * highIntensity);  // High-freq only buzz
 
-                // Low frequency portion: 2 segments (longer, stronger pulse)
-                // Simulates the heavy, slow rotation of the low-freq eccentric motor
-                timings[baseIdx] = 50 + (int)(30 * lowIntensity);     // Attack
-                amplitudes[baseIdx] = Math.min(255, (int)(effectiveLowFreq * 0.9));
-
-                timings[baseIdx + 1] = 40 + (int)(20 * lowIntensity); // Sustain/Decay
-                amplitudes[baseIdx + 1] = Math.min(255, effectiveLowFreq);
-
-                // Brief gap
-                timings[baseIdx + 2] = 15;
-                amplitudes[baseIdx + 2] = Math.max(1, (int)((effectiveLowFreq + effectiveHighFreq) * 0.15));
-
-                // High frequency portion: 4 segments (rapid short bursts)
-                // Simulates the fast, light vibration of the high-freq motor
-                for (int j = 0; j < 4; j++) {
-                    timings[baseIdx + 3 + j] = 18 + (int)(8 * highIntensity);
-                    // Oscillating amplitude for buzzing feel
-                    float oscillation = (j % 2 == 0) ? 1.0f : 0.65f;
-                    amplitudes[baseIdx + 3 + j] = Math.max(1, (int)(effectiveHighFreq * oscillation));
+            // Pattern: [PEAK] [BUZZ] [PEAK] [BUZZ] [PEAK] [BUZZ]
+            for (int i = 0; i < numSegments; i++) {
+                if (i % 2 == 0) {
+                    // Combined peak (both motors)
+                    timings[i] = peakDuration;
+                    amplitudes[i] = peakAmplitude;
+                } else {
+                    // High-freq only (low-freq pause)
+                    timings[i] = buzzDuration;
+                    amplitudes[i] = Math.max(1, baseAmplitude);
                 }
-
-                // Gap before next cycle
-                timings[baseIdx + 7] = 20 + (int)(15 * (1.0f - Math.max(lowIntensity, highIntensity)));
-                amplitudes[baseIdx + 7] = Math.max(1, (int)((effectiveLowFreq + effectiveHighFreq) * 0.1));
             }
 
             return VibrationEffect.createWaveform(timings, amplitudes, 0);
 
         } else if (effectiveLowFreq > 0) {
             // Only low frequency motor: simulate deep, heavy rumble
-            // Characteristics: long pulses, slow modulation, strong amplitude
-            // Creates a "throbbing" or "pounding" effect typical of heavy motors
+            // XInput left motor creates a slow "thump...thump...thump" sensation
+            // Key: VERY LONG pauses between pulses to make it feel slow and heavy
 
-            int numSegments = 8;
+            // 4 segments: [STRONG PULSE] [SILENCE] [STRONG PULSE] [SILENCE]
+            int numSegments = 4;
             long[] timings = new long[numSegments];
             int[] amplitudes = new int[numSegments];
 
-            // Total cycle time: 400-600ms for deep, slow rumble feel
-            int basePulseLength = 50 + (int)(40 * lowIntensity);
+            // Scale pulse duration with intensity
+            int pulseDuration = 150 + (int)(100 * lowIntensity);  // 150-250ms pulse
+            int pauseDuration = 100 + (int)(150 * (1.0f - lowIntensity));  // 100-250ms pause
 
             for (int i = 0; i < numSegments; i++) {
-                float phase = (float) i / numSegments;
-
-                // Asymmetric envelope: fast attack, sustain, slow decay
-                // Mimics real eccentric motor behavior
-                double envelope;
-                if (phase < 0.15) {
-                    // Fast attack
-                    envelope = phase / 0.15;
-                } else if (phase < 0.5) {
-                    // Sustain at peak with slight variation
-                    envelope = 0.95 + 0.05 * Math.sin(phase * Math.PI * 4);
-                } else if (phase < 0.85) {
-                    // Gradual decay
-                    envelope = 1.0 - ((phase - 0.5) / 0.35) * 0.4;
+                if (i % 2 == 0) {
+                    // Strong pulse - LONG duration
+                    timings[i] = pulseDuration;
+                    amplitudes[i] = effectiveLowFreq;
                 } else {
-                    // Low sustain before next cycle
-                    envelope = 0.6 - ((phase - 0.85) / 0.15) * 0.25;
+                    // Complete silence - LONG pause (this is the key difference!)
+                    timings[i] = pauseDuration;
+                    amplitudes[i] = 0;  // Complete silence
                 }
-
-                // Longer timing for low-frequency feel
-                timings[i] = basePulseLength + (int)(20 * Math.sin(phase * Math.PI));
-                amplitudes[i] = Math.max(1, (int)(effectiveLowFreq * envelope));
             }
 
             return VibrationEffect.createWaveform(timings, amplitudes, 0);
 
         } else {
-            // Only high frequency motor: rapid buzz pattern
-            // Characteristics: short pulses, fast modulation, medium amplitude
-            // Creates a "buzzing" or "tingling" effect typical of light motors
+            // Only high frequency motor: rapid continuous buzz
+            // XInput right motor creates an almost continuous "bzzzzzz" sensation
+            // Key: Almost NO pauses, just slight amplitude variation
 
-            int numSegments = 16;
+            // Many segments with minimal gaps for continuous feel
+            int numSegments = 8;
             long[] timings = new long[numSegments];
             int[] amplitudes = new int[numSegments];
 
-            // Base pulse length: 15-30ms for rapid, buzzy feel
-            int basePulseLength = 15 + (int)(15 * highIntensity);
+            // Very short timing for continuous buzz feel
+            int segmentDuration = 15 + (int)(10 * highIntensity);  // 15-25ms each
 
             for (int i = 0; i < numSegments; i++) {
-                float phase = (float) i / numSegments;
-
-                // Rapid on/off oscillation with amplitude variation
-                // Creates the characteristic "buzz" of high-freq motors
-                boolean isOnPhase = (i % 2 == 0);
-
-                if (isOnPhase) {
-                    // On phase: short burst
-                    timings[i] = basePulseLength;
-                    // Amplitude varies slightly for texture
-                    float variation = 0.85f + 0.15f * (float)Math.sin(phase * Math.PI * 6);
-                    amplitudes[i] = Math.max(1, (int)(effectiveHighFreq * variation));
-                } else {
-                    // Off/low phase: brief gap
-                    timings[i] = 8 + (int)(10 * (1.0f - highIntensity));
-                    // Not completely off, maintains some vibration
-                    amplitudes[i] = Math.max(1, (int)(effectiveHighFreq * 0.25));
-                }
+                timings[i] = segmentDuration;
+                // Slight amplitude variation for texture, but never drops below 60%
+                float variation = 0.6f + 0.4f * (float)Math.abs(Math.sin(i * Math.PI / 2));
+                amplitudes[i] = Math.max(1, (int)(effectiveHighFreq * variation));
             }
 
             return VibrationEffect.createWaveform(timings, amplitudes, 0);
@@ -2102,7 +2071,11 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
      * - LOW_TICK/SLOW_RISE: Simulates low frequency motor (deep rumble)
      * - TICK/QUICK_RISE: Simulates high frequency motor (sharp buzz)
      * - SPIN: Adds sustained rotation feel for combined motors
+     * - THUD: Adds heavy impact for intense low-frequency effects
      * - CLICK: Adds impact for intense combined rumble
+     *
+     * The composition creates multiple "pulses" to simulate continuous motor vibration,
+     * since haptic primitives are inherently transient effects.
      */
     private VibrationEffect createHapticCompositionEffect(int lowFreqAmplitude, int highFreqAmplitude) {
         // Use haptic primitives for more realistic feel on supported devices
@@ -2112,94 +2085,129 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         float lowFreqScale = lowFreqAmplitude / 255.0f;
         float highFreqScale = highFreqAmplitude / 255.0f;
 
+        // Minimum threshold for adding primitives (below this, effect is imperceptible)
+        final float MIN_THRESHOLD = 0.04f;
+
         boolean hasContent = false;
-        int currentDelay = 0;
+        int accumulatedDelay = 0;
 
+        // Create multiple pulses for sustained vibration feel
+        // More pulses for stronger vibration to maintain perception of continuity
+        int numPulses = Math.max(2, Math.min(4, (int)(Math.max(lowFreqScale, highFreqScale) * 5)));
 
-        // Low frequency motor simulation: creates deep, heavy rumble feel
-        // Uses different primitive combinations based on intensity levels
-        if (lowFreqScale > 0.05f) {
-            if (lowFreqScale > 0.75f) {
-                // Very strong low frequency: heavy thud with sustained rumble
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK,
-                    Math.min(1.0f, lowFreqScale), currentDelay);
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_SLOW_RISE,
-                    Math.min(1.0f, lowFreqScale * 0.8f), 8);
-                // Add thud for extra impact at max intensity
-                if (lowFreqScale > 0.9f) {
+        for (int pulse = 0; pulse < numPulses; pulse++) {
+            float pulseDecay = 1.0f - (pulse * 0.08f);  // Slight decay per pulse for natural feel
+            int pulseDelay = (pulse == 0) ? 0 : 5;  // Small gap between pulses
+
+            // === Low frequency motor simulation ===
+            if (lowFreqScale > MIN_THRESHOLD) {
+                float scaledLow = Math.min(1.0f, lowFreqScale * pulseDecay);
+
+                if (lowFreqScale > 0.8f) {
+                    // Maximum intensity: heavy thud with sustained rumble
                     composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_THUD,
-                        Math.min(1.0f, lowFreqScale * 0.6f), 15);
+                        scaledLow * 0.85f, pulseDelay);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK,
+                        scaledLow, 5);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_SLOW_RISE,
+                        scaledLow * 0.7f, 8);
+                    accumulatedDelay = 30;
+                    hasContent = true;
+                } else if (lowFreqScale > 0.55f) {
+                    // Strong low frequency: deep rumble
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK,
+                        scaledLow * 1.1f, pulseDelay);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_SLOW_RISE,
+                        scaledLow * 0.65f, 10);
+                    accumulatedDelay = 25;
+                    hasContent = true;
+                } else if (lowFreqScale > 0.3f) {
+                    // Medium low frequency: moderate rumble
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK,
+                        Math.min(1.0f, scaledLow * 1.25f), pulseDelay);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_SLOW_RISE,
+                        scaledLow * 0.4f, 12);
+                    accumulatedDelay = 20;
+                    hasContent = true;
+                } else {
+                    // Light low frequency: subtle rumble
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK,
+                        Math.min(1.0f, scaledLow * 1.5f), pulseDelay);
+                    accumulatedDelay = 15;
+                    hasContent = true;
                 }
-                currentDelay = 25;
-                hasContent = true;
-            } else if (lowFreqScale > 0.4f) {
-                // Medium-strong low frequency: noticeable rumble
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK,
-                    Math.min(1.0f, lowFreqScale * 1.1f), currentDelay);
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_SLOW_RISE,
-                    Math.min(1.0f, lowFreqScale * 0.5f), 10);
-                currentDelay = 20;
-                hasContent = true;
-            } else {
-                // Light low frequency: subtle rumble
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK,
-                    Math.min(1.0f, lowFreqScale * 1.3f), currentDelay);
-                currentDelay = 15;
-                hasContent = true;
             }
-        }
 
-        // High frequency motor simulation: creates sharp, buzzing feel
-        if (highFreqScale > 0.05f) {
-            if (highFreqScale > 0.75f) {
-                // Very strong high frequency: intense buzz
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
-                    Math.min(1.0f, highFreqScale), currentDelay);
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE,
-                    Math.min(1.0f, highFreqScale * 0.7f), 6);
-                // Double tick for sustained buzz feeling
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
-                    Math.min(1.0f, highFreqScale * 0.8f), 10);
-                currentDelay = 20;
-                hasContent = true;
-            } else if (highFreqScale > 0.4f) {
-                // Medium-strong high frequency: noticeable buzz
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
-                    Math.min(1.0f, highFreqScale * 1.1f), currentDelay);
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE,
-                    Math.min(1.0f, highFreqScale * 0.4f), 8);
-                currentDelay = 15;
-                hasContent = true;
-            } else {
-                // Light high frequency: subtle buzz
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
-                    Math.min(1.0f, highFreqScale * 1.4f), currentDelay);
-                currentDelay = 10;
-                hasContent = true;
+            // === High frequency motor simulation ===
+            if (highFreqScale > MIN_THRESHOLD) {
+                float scaledHigh = Math.min(1.0f, highFreqScale * pulseDecay);
+                int highDelay = (lowFreqScale > MIN_THRESHOLD) ? accumulatedDelay : pulseDelay;
+
+                if (highFreqScale > 0.8f) {
+                    // Maximum intensity: intense rapid buzz
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
+                        scaledHigh, highDelay);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE,
+                        scaledHigh * 0.75f, 4);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
+                        scaledHigh * 0.85f, 6);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_FALL,
+                        scaledHigh * 0.5f, 5);
+                    accumulatedDelay = 18;
+                    hasContent = true;
+                } else if (highFreqScale > 0.55f) {
+                    // Strong high frequency: sharp buzz
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
+                        scaledHigh * 1.1f, highDelay);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE,
+                        scaledHigh * 0.55f, 6);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
+                        scaledHigh * 0.7f, 8);
+                    accumulatedDelay = 15;
+                    hasContent = true;
+                } else if (highFreqScale > 0.3f) {
+                    // Medium high frequency: moderate buzz
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
+                        Math.min(1.0f, scaledHigh * 1.2f), highDelay);
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE,
+                        scaledHigh * 0.35f, 8);
+                    accumulatedDelay = 12;
+                    hasContent = true;
+                } else {
+                    // Light high frequency: subtle buzz
+                    composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK,
+                        Math.min(1.0f, scaledHigh * 1.6f), highDelay);
+                    accumulatedDelay = 10;
+                    hasContent = true;
+                }
             }
-        }
 
-        // Combined motor effect: add spin for sustained rumble when both are active
-        // This simulates the interference pattern between two motors
-        if (lowFreqScale > 0.15f && highFreqScale > 0.15f) {
-            // SPIN primitive creates a sustained rotation-like feel
-            // Scale based on the geometric mean of both motors for balanced feel
-            float spinScale = Math.min(1.0f, (float)Math.sqrt(lowFreqScale * highFreqScale) * 1.2f);
-            composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_SPIN,
-                spinScale, currentDelay);
+            // === Combined motor interaction effects ===
+            // When both motors are active, add effects that simulate their interaction
+            if (lowFreqScale > 0.12f && highFreqScale > 0.12f) {
+                // SPIN primitive creates a sustained rotation-like feel
+                // Use geometric mean for balanced feel between both motors
+                float combinedIntensity = (float) Math.sqrt(lowFreqScale * highFreqScale);
+                float spinScale = Math.min(1.0f, combinedIntensity * 1.3f * pulseDecay);
 
-            // For very intense combined rumble, add impact feedback
-            float dominantScale = Math.max(lowFreqScale, highFreqScale);
-            // Both scales are > 0.15f here due to the outer if condition
-            float ratio = (lowFreqScale > highFreqScale) ?
-                (lowFreqScale / highFreqScale) :
-                (highFreqScale / lowFreqScale);
+                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_SPIN,
+                    spinScale, accumulatedDelay);
+                accumulatedDelay = 20;
 
-            if (dominantScale > 0.7f && ratio < 2.0f) {
-                // Both motors are strong and relatively balanced - add click for impact
-                float clickScale = Math.min(1.0f, dominantScale * 0.5f);
-                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK,
-                    clickScale, 30);
+                // For very intense combined rumble, add impact feedback
+                if (pulse == 0 && combinedIntensity > 0.5f) {
+                    // Calculate balance ratio
+                    float dominantScale = Math.max(lowFreqScale, highFreqScale);
+                    float minorScale = Math.min(lowFreqScale, highFreqScale);
+                    float balanceRatio = minorScale / dominantScale;
+
+                    // Add click for balanced, intense vibration
+                    if (balanceRatio > 0.4f && dominantScale > 0.65f) {
+                        float clickScale = Math.min(1.0f, combinedIntensity * 0.6f);
+                        composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK,
+                            clickScale, 25);
+                    }
+                }
             }
         }
 
@@ -2216,35 +2224,340 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         }
     }
 
+    /**
+     * Applies perceptual amplitude curve to convert linear motor values to perceptual intensity.
+     * Human perception of vibration intensity follows a roughly logarithmic/power curve,
+     * not a linear one. This creates more natural-feeling vibration responses.
+     *
+     * @param linearAmplitude Linear amplitude (0-255)
+     * @return Perceptually-corrected amplitude (0-255)
+     */
+    private static int applyPerceptualCurve(int linearAmplitude) {
+        if (linearAmplitude <= 0) return 0;
+        if (linearAmplitude >= 255) return 255;
+
+        // Use a power curve (gamma ~1.8) for more natural feel
+        // Low values are boosted slightly to ensure they're perceptible
+        // High values are slightly compressed to prevent saturation
+        float normalized = linearAmplitude / 255.0f;
+        float curved = (float) Math.pow(normalized, 0.55);  // Inverse gamma for perception
+
+        // Apply slight boost for very low values to ensure they're felt
+        if (normalized < 0.1f) {
+            curved = Math.max(curved, normalized * 2.5f);
+        }
+
+        return Math.min(255, Math.max(1, (int)(curved * 255)));
+    }
+
+    /**
+     * Calculates the combined amplitude when both motors are active.
+     * Uses a model that accounts for mechanical interference between motors.
+     * Real dual-motor controllers create complex vibration patterns due to
+     * the interaction of two eccentric rotating masses.
+     *
+     * @param lowFreq Low frequency motor amplitude (0-255)
+     * @param highFreq High frequency motor amplitude (0-255)
+     * @return Combined amplitude accounting for motor interaction
+     */
+    private static int calculateCombinedAmplitude(int lowFreq, int highFreq) {
+        if (lowFreq == 0 && highFreq == 0) return 0;
+        if (lowFreq == 0) return highFreq;
+        if (highFreq == 0) return lowFreq;
+
+        // Model based on real dual-motor behavior:
+        // - When both motors spin, they can constructively or destructively interfere
+        // - The dominant motor (heavier low-freq) contributes more to perceived intensity
+        // - Some energy is lost to interference when motors are out of phase
+
+        float lowNorm = lowFreq / 255.0f;
+        float highNorm = highFreq / 255.0f;
+
+        // Weight low frequency more heavily (it's the heavier motor, more impactful)
+        float lowWeight = 0.70f;
+        float highWeight = 0.45f;
+
+        // Calculate base combined intensity
+        float combined = lowNorm * lowWeight + highNorm * highWeight;
+
+        // Add synergy bonus when both motors are active at similar levels
+        // This simulates the "fuller" vibration feel of both motors
+        float balance = 1.0f - Math.abs(lowNorm - highNorm);
+        float synergyBonus = balance * Math.min(lowNorm, highNorm) * 0.15f;
+        combined += synergyBonus;
+
+        // Soft clipping to prevent harsh saturation
+        if (combined > 0.9f) {
+            combined = 0.9f + (combined - 0.9f) * 0.5f;
+        }
+
+        return Math.min(255, Math.max(1, (int)(combined * 255)));
+    }
+
+    /**
+     * Creates a VibrationEffect using WaveformEnvelopeBuilder for API 36+ devices.
+     * This provides the most precise dual-motor simulation by allowing direct control
+     * over amplitude envelopes with millisecond-level timing precision and frequency control.
+     *
+     * XInput motor specifications (Xbox 360/One controller):
+     * - Left motor (wLeftMotorSpeed): Heavy eccentric mass (~40g), ~20-30Hz rotation
+     * - Right motor (wRightMotorSpeed): Light eccentric mass (~10g), ~100-150Hz rotation
+     *
+     * The WaveformEnvelopeBuilder allows us to directly specify vibration frequency,
+     * enabling accurate simulation of the physical motor characteristics.
+     *
+     * @param lowFreqAmplitude Low frequency motor amplitude (0-255, perceptually corrected)
+     * @param highFreqAmplitude High frequency motor amplitude (0-255, perceptually corrected)
+     * @return VibrationEffect created with WaveformEnvelopeBuilder, or null if creation fails
+     */
+    @android.annotation.SuppressLint("NewApi")
+    private VibrationEffect createWaveformEnvelopeEffect(int lowFreqAmplitude, int highFreqAmplitude) {
+        if (Build.VERSION.SDK_INT < 36) {
+            return null;
+        }
+
+        try {
+            // Normalize to 0.0-1.0 scale
+            float lowFreqScale = lowFreqAmplitude / 255.0f;
+            float highFreqScale = highFreqAmplitude / 255.0f;
+
+            // Use WaveformEnvelopeBuilder for precise amplitude control
+            VibrationEffect.WaveformEnvelopeBuilder builder = new VibrationEffect.WaveformEnvelopeBuilder();
+
+            // Total waveform duration for one cycle
+            // Using repeating pattern, so we need a complete cycle that loops smoothly
+            final int CYCLE_DURATION_MS = 200;  // 200ms per cycle = 5Hz modulation
+
+            if (lowFreqScale > 0.02f && highFreqScale > 0.02f) {
+                // Both motors active: create interleaved waveform
+                // Simulate the beat frequency between the two motors
+                buildDualMotorEnvelope(builder, lowFreqScale, highFreqScale, CYCLE_DURATION_MS);
+            } else if (lowFreqScale > 0.02f) {
+                // Only low frequency: deep, slow rumble
+                buildLowFreqEnvelope(builder, lowFreqScale, CYCLE_DURATION_MS);
+            } else if (highFreqScale > 0.02f) {
+                // Only high frequency: rapid buzz
+                buildHighFreqEnvelope(builder, highFreqScale, CYCLE_DURATION_MS);
+            } else {
+                return null;
+            }
+
+            return builder.build();
+        } catch (Exception e) {
+            LimeLog.warning("WaveformEnvelopeBuilder failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Builds an envelope simulating both low and high frequency motors running together.
+     * Creates an interleaved pattern where:
+     * - Low frequency components create slow, heavy modulation
+     * - High frequency components create rapid, light oscillation
+     * - The combination produces realistic dual-motor vibration feel
+     *
+     * XInput motor specifications:
+     * - Left motor (wLeftMotorSpeed): Heavy eccentric mass, ~20-30Hz rotation
+     * - Right motor (wRightMotorSpeed): Light eccentric mass, ~100-150Hz rotation
+     *
+     * WaveformEnvelopeBuilder.addControlPoint(amplitude, frequency, durationMillis):
+     * - amplitude: Vibration intensity (0.0-1.0)
+     * - frequency: Vibration frequency in Hz (-1 for device default)
+     * - durationMillis: Duration of this control point in milliseconds
+     */
+    @android.annotation.SuppressLint("NewApi")
+    private void buildDualMotorEnvelope(VibrationEffect.WaveformEnvelopeBuilder builder,
+                                        float lowFreqScale, float highFreqScale, int cycleDurationMs) {
+        // Calculate blend ratio for mixing both motors
+        float blendRatio = lowFreqScale / (lowFreqScale + highFreqScale);  // 0-1, higher = more low freq
+
+        // XInput-accurate frequency simulation:
+        // Left motor (low frequency): ~20-30Hz (heavy eccentric mass, creates deep rumble)
+        // Right motor (high frequency): ~100-150Hz (light mass, creates sharp buzz)
+        // Note: Android vibrators typically support 1-500Hz range
+        float lowFreqHz = 25.0f;    // XInput left motor typical frequency
+        float highFreqHz = 120.0f;  // XInput right motor typical frequency
+
+        // Number of control points for smooth envelope
+        int numPoints = 8;
+        long segmentDurationMs = cycleDurationMs / numPoints;
+
+        for (int i = 0; i < numPoints; i++) {
+            float phase = (float) i / numPoints;
+
+            // Low frequency envelope: smooth sine wave modulation
+            // Mimics the slow, heavy rotation of the left motor's eccentric mass
+            float lowFreqEnvelope = 0.7f + 0.3f * (float) Math.sin(phase * 2 * Math.PI);
+
+            // High frequency rapid oscillation on top
+            // Mimics the fast, light vibration of the right motor
+            float highFreqOscillation = (i % 2 == 0) ? 1.0f : 0.6f;
+
+            // Blend the two motor contributions
+            float lowContribution = lowFreqScale * lowFreqEnvelope * blendRatio;
+            float highContribution = highFreqScale * highFreqOscillation * (1.0f - blendRatio * 0.5f);
+
+            // Combined amplitude with synergy boost
+            float combinedAmplitude = (lowContribution + highContribution);
+            if (lowFreqScale > 0.2f && highFreqScale > 0.2f) {
+                combinedAmplitude *= 1.05f;
+            }
+            combinedAmplitude = Math.min(1.0f, Math.max(0.0f, combinedAmplitude));
+
+            // Blend frequency based on current phase contribution
+            // When low freq dominates, use lower frequency; when high freq dominates, use higher
+            float freqBlend = lowContribution / (lowContribution + highContribution + 0.001f);
+            float frequency = lowFreqHz * freqBlend + highFreqHz * (1.0f - freqBlend);
+
+            builder.addControlPoint(combinedAmplitude, frequency, segmentDurationMs);
+        }
+    }
+
+    /**
+     * Builds an envelope simulating only the low frequency motor (XInput left motor).
+     * Characteristics:
+     * - Slow, smooth amplitude modulation (~5-10Hz perceived beat)
+     * - Asymmetric attack/decay mimicking real motor spin-up behavior
+     * - Heavy, thumping sensation
+     * - XInput left motor: ~20-30Hz, heavy eccentric mass (~40g)
+     */
+    @android.annotation.SuppressLint("NewApi")
+    private void buildLowFreqEnvelope(VibrationEffect.WaveformEnvelopeBuilder builder,
+                                      float lowFreqScale, int cycleDurationMs) {
+        // XInput left motor characteristic frequency (~20-30Hz)
+        final float LOW_FREQ_HZ = 25.0f;
+
+        // Use 6 segments for smooth low-frequency modulation
+        int numSegments = 6;
+        long segmentDurationMs = cycleDurationMs / numSegments;
+
+        for (int i = 0; i < numSegments; i++) {
+            float phase = (float) i / numSegments;
+
+            // Asymmetric envelope: fast attack, sustained peak, gradual decay
+            float envelope;
+            if (phase < 0.15f) {
+                // Fast attack
+                envelope = 0.6f + 0.4f * (phase / 0.15f);
+            } else if (phase < 0.4f) {
+                // Peak with slight resonance ripple
+                envelope = 1.0f - 0.05f * (float) Math.sin((phase - 0.15f) * 20 * Math.PI);
+            } else if (phase < 0.8f) {
+                // Gradual decay
+                float decayPhase = (phase - 0.4f) / 0.4f;
+                envelope = 1.0f - 0.35f * decayPhase;
+            } else {
+                // Settle to base level before next cycle
+                float settlePhase = (phase - 0.8f) / 0.2f;
+                envelope = 0.65f - 0.1f * settlePhase;
+            }
+
+            float amplitude = Math.min(1.0f, Math.max(0.0f, lowFreqScale * envelope));
+            builder.addControlPoint(amplitude, LOW_FREQ_HZ, segmentDurationMs);
+        }
+    }
+
+    /**
+     * Builds an envelope simulating only the high frequency motor (XInput right motor).
+     * Characteristics:
+     * - Rapid amplitude oscillation (~20-40Hz perceived)
+     * - Sharp on/off transitions
+     * - Buzzing, tingling sensation
+     * - XInput right motor: ~100-150Hz, light eccentric mass (~10g)
+     */
+    @android.annotation.SuppressLint("NewApi")
+    private void buildHighFreqEnvelope(VibrationEffect.WaveformEnvelopeBuilder builder,
+                                       float highFreqScale, int cycleDurationMs) {
+        // XInput right motor characteristic frequency (~100-150Hz)
+        final float HIGH_FREQ_HZ = 120.0f;
+
+        // Use more segments for rapid high-frequency feel
+        int numSegments = 12;
+        long segmentDurationMs = cycleDurationMs / numSegments;
+
+        for (int i = 0; i < numSegments; i++) {
+            float phase = (float) i / numSegments;
+
+            // Rapid oscillation pattern with varying intensity
+            float baseOscillation;
+            int pattern = i % 4;
+            switch (pattern) {
+                case 0:
+                    baseOscillation = 1.0f;  // Peak
+                    break;
+                case 1:
+                    baseOscillation = 0.65f;  // Medium-high
+                    break;
+                case 2:
+                    baseOscillation = 0.85f;  // High
+                    break;
+                default:
+                    baseOscillation = 0.4f;   // Dip
+                    break;
+            }
+
+            // Add slight overall envelope modulation for texture
+            float envelopeModulation = 0.9f + 0.1f * (float) Math.sin(phase * 4 * Math.PI);
+
+            float amplitude = Math.min(1.0f, Math.max(0.0f, highFreqScale * baseOscillation * envelopeModulation));
+            builder.addControlPoint(amplitude, HIGH_FREQ_HZ, segmentDurationMs);
+        }
+    }
+
     private void rumbleSingleVibrator(Vibrator vibrator, short lowFreqMotor, short highFreqMotor) {
         // Normalize motor values to 0-255 range
         int lowFreqAmplitude = (lowFreqMotor >> 8) & 0xFF;
         int highFreqAmplitude = (highFreqMotor >> 8) & 0xFF;
 
         // Cancel vibration if both motors are effectively off
-        if (lowFreqAmplitude == 0 && highFreqAmplitude == 0) {
+        // Use a small threshold to filter out noise
+        if (lowFreqAmplitude < 3 && highFreqAmplitude < 3) {
             vibrator.cancel();
             return;
         }
 
+        // Apply perceptual curve for more natural response
+        int perceivedLow = applyPerceptualCurve(lowFreqAmplitude);
+        int perceivedHigh = applyPerceptualCurve(highFreqAmplitude);
+
         // Require amplitude control for rumble simulation
         // Devices without amplitude control cannot properly simulate dual-motor vibration
         if (!vibrator.hasAmplitudeControl()) {
+            // For devices without amplitude control, use basic on/off vibration
+            // Only vibrate if intensity is above a threshold
+            if (lowFreqAmplitude > 30 || highFreqAmplitude > 30) {
+                VibrationEffect effect = VibrationEffect.createOneShot(60000, VibrationEffect.DEFAULT_AMPLITUDE);
+                vibrator.vibrate(effect);
+            }
             return;
         }
 
         VibrationEffect effect = null;
 
-        // Try haptic composition first (most precise simulation)
-        try {
-            effect = createHapticCompositionEffect(lowFreqAmplitude, highFreqAmplitude);
-        } catch (Exception e) {
-            // Haptic composition not fully supported, fall through to waveform
+        // API 36+: Use WaveformEnvelopeBuilder for most precise motor simulation
+        // This provides direct control over amplitude envelopes with millisecond precision
+        if (Build.VERSION.SDK_INT >= 36) {
+            try {
+                effect = createWaveformEnvelopeEffect(perceivedLow, perceivedHigh);
+            } catch (Exception e) {
+                LimeLog.info("WaveformEnvelopeBuilder unavailable, trying fallback methods");
+            }
+        }
+
+        // API 30+: Try haptic composition for devices that support it
+        // Haptic composition provides precise tactile simulation using predefined primitives
+        if (effect == null) {
+            try {
+                effect = createHapticCompositionEffect(perceivedLow, perceivedHigh);
+            } catch (Exception e) {
+                // Haptic composition not fully supported, fall through to waveform
+                LimeLog.info("Haptic composition unavailable, using waveform fallback");
+            }
         }
 
         // Fall back to waveform-based simulation
         if (effect == null) {
-            effect = createDualMotorWaveformEffect(lowFreqAmplitude, highFreqAmplitude);
+            effect = createDualMotorWaveformEffect(perceivedLow, perceivedHigh);
         }
 
         // Use the effect if we created one successfully
@@ -2256,13 +2569,12 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             return;
         }
 
-        // Fallback: simple amplitude-based vibration
-        // Calculate combined amplitude using perceptual weighting
-        float synergy = (lowFreqAmplitude > 30 && highFreqAmplitude > 30) ? 1.08f : 1.0f;
-        int simulatedAmplitude = Math.min(255,
-            (int)((lowFreqAmplitude * 0.65 + highFreqAmplitude * 0.45) * synergy));
+        // Final fallback: optimized single-amplitude vibration
+        // Use calculated combined amplitude for best single-motor approximation
+        int combinedAmplitude = calculateCombinedAmplitude(perceivedLow, perceivedHigh);
 
-        VibrationEffect simpleEffect = VibrationEffect.createOneShot(60000, simulatedAmplitude);
+        // Use a long duration that will be cancelled when motors stop
+        VibrationEffect simpleEffect = VibrationEffect.createOneShot(60000, combinedAmplitude);
         VibrationAttributes vibrationAttributes = new VibrationAttributes.Builder()
                 .setUsage(VibrationAttributes.USAGE_MEDIA)
                 .build();

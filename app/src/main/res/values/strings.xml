@@ -387,6 +387,12 @@
     <string name="gamepad_test_vibration_dual">Dual Motor</string>
     <string name="gamepad_test_vibration_quad">Quad Motor/Trigger</string>
     <string name="gamepad_test_vibration_amplitude">Amplitude Control</string>
+    <string name="gamepad_test_xinput_section">XInput Intensity Test</string>
+    <string name="gamepad_test_left_motor">Left Motor (~25Hz)</string>
+    <string name="gamepad_test_right_motor">Right Motor (~120Hz)</string>
+    <string name="gamepad_test_left_trigger">Left Trigger</string>
+    <string name="gamepad_test_right_trigger">Right Trigger</string>
+    <string name="gamepad_test_vibrate_custom">Start Custom Vibration</string>
     <string name="title_gamepad_test">Gamepad test</string>
     <string name="summary_gamepad_test">Test connected gamepads and vibration</string>
 
