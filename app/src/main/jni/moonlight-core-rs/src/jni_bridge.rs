@@ -13,7 +13,6 @@ use crate::callbacks::{
     bridge_cl_set_motion_event_state, bridge_cl_set_controller_led,
     set_jni_callbacks,
 };
-use crate::controller::{guess_controller_has_paddles, guess_controller_has_share_button, guess_controller_type};
 use crate::ffi::*;
 use crate::jni_helpers;
 use libc::{c_char, c_void};
@@ -620,46 +619,6 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_getLaunchUrlQueryPa
     unsafe { jni_new_string_utf(env, params) }
 }
 
-/// Guess controller type
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_guessControllerType(
-    _env: JNIEnv,
-    _clazz: JClass,
-    vendor_id: JInt,
-    product_id: JInt,
-) -> JByte {
-    guess_controller_type(vendor_id, product_id)
-}
-
-/// Guess if controller has paddles
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_guessControllerHasPaddles(
-    _env: JNIEnv,
-    _clazz: JClass,
-    vendor_id: JInt,
-    product_id: JInt,
-) -> JBoolean {
-    if guess_controller_has_paddles(vendor_id, product_id) {
-        JNI_TRUE
-    } else {
-        JNI_FALSE
-    }
-}
-
-/// Guess if controller has share button
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_guessControllerHasShareButton(
-    _env: JNIEnv,
-    _clazz: JClass,
-    vendor_id: JInt,
-    product_id: JInt,
-) -> JBoolean {
-    if guess_controller_has_share_button(vendor_id, product_id) {
-        JNI_TRUE
-    } else {
-        JNI_FALSE
-    }
-}
 
 /// Start connection
 #[no_mangle]

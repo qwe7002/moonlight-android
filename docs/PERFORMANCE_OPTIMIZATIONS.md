@@ -118,25 +118,28 @@ Added `#[cold]` attribute to infrequently executed paths:
 
 Moved USB VID/PID based controller detection logic from Rust to Java.
 
-### Files Added:
-- `ControllerDetection.java` - New Java class with controller detection logic
+### Files Removed (Rust):
+- `usb_ids.rs` - USB VID/PID constants (deleted)
+- `controller.rs` - Controller type detection logic (deleted)
+- Related JNI functions in `jni_bridge.rs` (removed)
+
+### Files Added (Java):
+- `ControllerDetection.java` - New Java class with all controller detection logic
 
 ### Files Modified:
+- `lib.rs` - Removed `usb_ids` and `controller` module declarations
+- `jni_bridge.rs` - Removed controller-related JNI functions
 - `ControllerHandler.java` - Uses `ControllerDetection` instead of native calls
 - `GamepadTestActivity.java` - Uses `ControllerDetection` instead of native calls
-- `MoonBridge.java` - Native methods deprecated but kept for backward compatibility
+- `MoonBridge.java` - Removed native controller detection methods
 
 ### Benefits:
 - **Eliminates JNI overhead** for controller detection calls
 - **Easier maintenance** - Java code is simpler to update
-- **Reduced binary size** - Less Rust code to compile
+- **Reduced binary size** - ~200+ lines of Rust code removed
+- **Faster compilation** - Less Rust code to compile
 - **Faster startup** - No need to initialize Rust controller lookup tables
 
-### Note:
-The Rust native methods (`guessControllerType`, `guessControllerHasPaddles`, `guessControllerHasShareButton`) 
-are still available but deprecated. They can be removed in a future version to further reduce binary size.
-
-The `usb_ids.rs` and `controller.rs` files in Rust can also be removed once the deprecated native methods are removed.
 
 ## Testing Recommendations
 

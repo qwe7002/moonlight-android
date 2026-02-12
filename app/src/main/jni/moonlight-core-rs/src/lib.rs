@@ -14,10 +14,6 @@ mod opus;
 #[cfg(target_os = "android")]
 pub mod crypto;
 #[cfg(target_os = "android")]
-mod usb_ids;
-#[cfg(target_os = "android")]
-mod controller;
-#[cfg(target_os = "android")]
 mod jni_helpers;
 #[cfg(target_os = "android")]
 mod callbacks;
