@@ -2,6 +2,8 @@
 //!
 //! This module contains raw FFI declarations for the moonlight-common-c C library.
 
+#![allow(dead_code)]
+
 use libc::{c_char, c_int, c_short, c_uchar, c_uint, c_ushort, c_void, size_t};
 
 // Buffer types for decode units

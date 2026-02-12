@@ -7,6 +7,44 @@ use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Check if this is a release build
+fn is_release_build() -> bool {
+    env::var("PROFILE").map(|p| p == "release").unwrap_or(false)
+}
+
+/// Get optimization flags based on build profile
+fn get_optimization_flags() -> Vec<&'static str> {
+    if is_release_build() {
+        vec!["-O3", "-ffast-math", "-fno-finite-math-only"]
+    } else {
+        vec!["-O0", "-g"]
+    }
+}
+
+/// Apply common build settings to a cc::Build instance
+fn apply_common_settings(build: &mut cc::Build) {
+    let opt_flags = get_optimization_flags();
+    for flag in &opt_flags {
+        build.flag(flag);
+    }
+
+    // ARM64 NEON is always available on aarch64
+    build.flag("-march=armv8-a");
+
+    // Enable parallel compilation
+    build.flag("-pipe");
+
+    if is_release_build() {
+        // Enable function/data sections for better dead code elimination
+        build.flag("-ffunction-sections");
+        build.flag("-fdata-sections");
+        // Enable link-time optimization hints
+        build.flag("-flto=thin");
+        // Vectorization for better SIMD utilization
+        build.flag("-ftree-vectorize");
+    }
+}
+
 fn main() {
     let target = env::var("TARGET").unwrap();
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -40,7 +78,8 @@ fn main() {
 
     // Build enet library
     let enet_dir = moonlight_common_c_dir.join("enet");
-    cc::Build::new()
+    let mut enet_build = cc::Build::new();
+    enet_build
         .file(enet_dir.join("callbacks.c"))
         .file(enet_dir.join("compress.c"))
         .file(enet_dir.join("host.c"))
@@ -52,20 +91,24 @@ fn main() {
         .include(enet_dir.join("include"))
         .define("HAS_SOCKLEN_T", "1")
         .define("HAVE_CLOCK_GETTIME", "1")
-        .warnings(false)
-        .compile("enet");
+        .warnings(false);
+    apply_common_settings(&mut enet_build);
+    enet_build.compile("enet");
 
     // Build reed-solomon library
     let rs_dir = moonlight_common_c_dir.join("reedsolomon");
-    cc::Build::new()
+    let mut rs_build = cc::Build::new();
+    rs_build
         .file(rs_dir.join("rs.c"))
         .include(&rs_dir)
-        .warnings(false)
-        .compile("reedsolomon");
+        .warnings(false);
+    apply_common_settings(&mut rs_build);
+    rs_build.compile("reedsolomon");
 
     // Build moonlight-common-c library (without PlatformCrypto.c - using Rust ring instead)
     let src_dir = moonlight_common_c_dir.join("src");
-    cc::Build::new()
+    let mut mlc_build = cc::Build::new();
+    mlc_build
         .file(src_dir.join("AudioStream.c"))
         .file(src_dir.join("ByteBuffer.c"))
         .file(src_dir.join("Connection.c"))
@@ -92,8 +135,9 @@ fn main() {
         .define("HAS_SOCKLEN_T", "1")
         .define("LC_ANDROID", None)
         .define("HAVE_CLOCK_GETTIME", "1")
-        .warnings(false)
-        .compile("moonlight-common-c");
+        .warnings(false);
+    apply_common_settings(&mut mlc_build);
+    mlc_build.compile("moonlight-common-c");
 
     // Link Android system libraries
     println!("cargo:rustc-link-lib=log");
@@ -128,6 +172,7 @@ fn build_opus() {
     let celt_dir = opus_dir.join("celt");
     let silk_dir = opus_dir.join("silk");
     let silk_float_dir = silk_dir.join("float");
+    let silk_fixed_dir = silk_dir.join("fixed");
     let src_dir = opus_dir.join("src");
 
     let mut build = cc::Build::new();
@@ -139,13 +184,59 @@ fn build_opus() {
         .include(&celt_dir)
         .include(&silk_dir)
         .include(&silk_float_dir)
+        .include(&silk_fixed_dir)
         .include(&src_dir);
 
-    // Defines for floating-point build
+    // Defines for build
     build
         .define("OPUS_BUILD", None)
         .define("HAVE_LRINTF", "1")
-        .define("VAR_ARRAYS", None);
+        .define("VAR_ARRAYS", None)
+        .define("FIXED_POINT", None);
+
+    // ARM64 NEON intrinsic directory
+    let celt_arm_dir = celt_dir.join("arm");
+    let silk_arm_dir = silk_dir.join("arm");
+
+    // Check if NEON sources are available and add them
+    let has_neon = celt_arm_dir.exists() && silk_arm_dir.exists();
+    if has_neon {
+        build
+            .include(&celt_arm_dir)
+            .include(&silk_arm_dir)
+            // Enable ARM64 intrinsics for better performance
+            .define("OPUS_ARM_ASM", None)
+            .define("OPUS_ARM_MAY_HAVE_NEON_INTR", None)
+            .define("OPUS_ARM_PRESUME_NEON_INTR", None);
+
+        // CELT ARM NEON sources
+        let celt_arm_sources = [
+            "arm_celt_map.c",
+            "celt_neon_intr.c",
+            "pitch_neon_intr.c",
+        ];
+        for src in &celt_arm_sources {
+            let path = celt_arm_dir.join(src);
+            if path.exists() {
+                build.file(path);
+            }
+        }
+
+        // SILK ARM NEON sources
+        let silk_arm_sources = [
+            "arm_silk_map.c",
+            "biquad_alt_neon_intr.c",
+            "LPC_inv_pred_gain_neon_intr.c",
+            "NSQ_del_dec_neon_intr.c",
+            "NSQ_neon.c",
+        ];
+        for src in &silk_arm_sources {
+            let path = silk_arm_dir.join(src);
+            if path.exists() {
+                build.file(path);
+            }
+        }
+    }
 
 
     // CELT sources
@@ -263,39 +354,34 @@ fn build_opus() {
         }
     }
 
-    // SILK float sources
-    let silk_float_sources = [
-        "apply_sine_window_FLP.c",
-        "autocorrelation_FLP.c",
-        "burg_modified_FLP.c",
-        "bwexpander_FLP.c",
-        "corrMatrix_FLP.c",
-        "encode_frame_FLP.c",
-        "energy_FLP.c",
-        "find_LPC_FLP.c",
-        "find_LTP_FLP.c",
-        "find_pitch_lags_FLP.c",
-        "find_pred_coefs_FLP.c",
-        "inner_product_FLP.c",
-        "k2a_FLP.c",
-        "LPC_analysis_filter_FLP.c",
-        "LPC_inv_pred_gain_FLP.c",
-        "LTP_analysis_filter_FLP.c",
-        "LTP_scale_ctrl_FLP.c",
-        "noise_shape_analysis_FLP.c",
-        "pitch_analysis_core_FLP.c",
-        "process_gains_FLP.c",
-        "regularize_correlations_FLP.c",
-        "residual_energy_FLP.c",
-        "scale_copy_vector_FLP.c",
-        "scale_vector_FLP.c",
-        "schur_FLP.c",
-        "sort_FLP.c",
-        "warped_autocorrelation_FLP.c",
-        "wrappers_FLP.c",
+    // SILK fixed sources (for FIXED_POINT mode with ARM NEON optimization)
+    let silk_fixed_sources = [
+        "apply_sine_window_FIX.c",
+        "autocorr_FIX.c",
+        "burg_modified_FIX.c",
+        "corrMatrix_FIX.c",
+        "encode_frame_FIX.c",
+        "find_LPC_FIX.c",
+        "find_LTP_FIX.c",
+        "find_pitch_lags_FIX.c",
+        "find_pred_coefs_FIX.c",
+        "k2a_FIX.c",
+        "k2a_Q16_FIX.c",
+        "LTP_analysis_filter_FIX.c",
+        "LTP_scale_ctrl_FIX.c",
+        "noise_shape_analysis_FIX.c",
+        "pitch_analysis_core_FIX.c",
+        "process_gains_FIX.c",
+        "regularize_correlations_FIX.c",
+        "residual_energy_FIX.c",
+        "residual_energy16_FIX.c",
+        "schur_FIX.c",
+        "schur64_FIX.c",
+        "vector_ops_FIX.c",
+        "warped_autocorrelation_FIX.c",
     ];
-    for src in &silk_float_sources {
-        let path = silk_float_dir.join(src);
+    for src in &silk_fixed_sources {
+        let path = silk_fixed_dir.join(src);
         if path.exists() {
             build.file(path);
         }
@@ -326,6 +412,7 @@ fn build_opus() {
     }
 
     build.warnings(false);
+    apply_common_settings(&mut build);
     build.compile("opus");
 
     // Tell cargo where to find opus headers for the Rust bindings

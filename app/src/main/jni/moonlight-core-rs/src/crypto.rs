@@ -42,7 +42,7 @@ struct HmacContext {
 /// Platform crypto context (matches PLT_CRYPTO_CONTEXT in PlatformCrypto.h)
 /// This is a general-purpose context that can handle both AES-CBC and AES-GCM
 #[repr(C)]
-struct PltCryptoContext {
+pub struct PltCryptoContext {
     initialized: bool,
     // We store the key for later use since ring requires creating new contexts per operation
     key_data: [u8; 32],

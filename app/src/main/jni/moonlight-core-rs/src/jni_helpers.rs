@@ -3,6 +3,8 @@
 //! This module provides safe wrappers around JNI operations for calling Java methods
 //! from native callbacks.
 
+#![allow(dead_code)]
+
 use libc::{c_char, c_void};
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};

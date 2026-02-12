@@ -28,15 +28,24 @@ android_logger = "0.14"
 [build-dependencies]
 cc = "1.0"
 
+[profile.dev]
+opt-level = 0
+# Don't strip symbols - JNI functions need to be exported
+strip = false
+# Enable overflow checks for safety in debug
+overflow-checks = true
+# Include debug symbols for debugging
+debug = true
+
 [profile.release]
 opt-level = 3
-lto = "fat"
+lto = "thin"
 codegen-units = 1
 panic = "abort"
 # Don't strip symbols - JNI functions need to be exported
 strip = false
-# Enable overflow checks for safety without performance impact in release
+# Disable overflow checks for performance in release
 overflow-checks = false
-# Optimize for binary size while keeping performance
+# No debug symbols in release
 debug = false
 

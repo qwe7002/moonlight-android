@@ -72,6 +72,10 @@ android {
     }
 }
 
+// Determine Cargo profile based on build type
+def isReleaseBuild = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+//def cargoProfile = isReleaseBuild ? "release" : "debug"
+
 cargo {
     module = "./src/main/jni/moonlight-core-rs"
     libname = "moonlight_core"
@@ -82,7 +86,7 @@ cargo {
 
 // Hook Rust compilation into Android build
 tasks.configureEach { task ->
-    if ((task.name == 'mergeDebugJniLibFolders' || task.name == 'mergeReleaseJniLibFolders')) {
+    if (task.name == 'mergeDebugJniLibFolders' || task.name == 'mergeReleaseJniLibFolders') {
         task.dependsOn 'cargoBuild'
     }
 }

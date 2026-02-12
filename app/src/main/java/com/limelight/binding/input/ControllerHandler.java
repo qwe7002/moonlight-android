@@ -1977,84 +1977,130 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         float highIntensity = effectiveHighFreq / 255.0f;
 
         if (effectiveLowFreq > 0 && effectiveHighFreq > 0) {
-            // Both motors active: combine slow pulses (low freq) with continuous buzz (high freq)
-            // The pattern alternates between:
-            // - Combined strong pulse (both motors)
-            // - High-freq only buzz (during low-freq pause)
+            // Both motors active: create an advanced interleaved pattern
+            // that simulates the beat frequency between two motors
 
-            int numSegments = 6;
-            long[] timings = new long[numSegments];
-            int[] amplitudes = new int[numSegments];
+            // Determine cycle parameters based on intensity
+            int cycleCount = 4;  // Number of complete pattern cycles
+            int segmentsPerCycle = 10;  // Segments within each cycle
+            int totalSegments = cycleCount * segmentsPerCycle;
 
-            // Calculate combined amplitude (high freq provides baseline, low freq adds peaks)
-            int baseAmplitude = (int)(effectiveHighFreq * 0.7f);  // Continuous high-freq buzz
-            int peakAmplitude = Math.min(255, effectiveLowFreq + (int)(effectiveHighFreq * 0.5f));
+            long[] timings = new long[totalSegments];
+            int[] amplitudes = new int[totalSegments];
 
-            // Timing based on low-freq rhythm with high-freq fill
-            int peakDuration = 120 + (int)(80 * lowIntensity);  // Strong combined pulse
-            int buzzDuration = 60 + (int)(40 * highIntensity);  // High-freq only buzz
+            for (int cycle = 0; cycle < cycleCount; cycle++) {
+                int baseIdx = cycle * segmentsPerCycle;
+                float cyclePhase = (float) cycle / cycleCount;
 
-            // Pattern: [PEAK] [BUZZ] [PEAK] [BUZZ] [PEAK] [BUZZ]
-            for (int i = 0; i < numSegments; i++) {
-                if (i % 2 == 0) {
-                    // Combined peak (both motors)
-                    timings[i] = peakDuration;
-                    amplitudes[i] = peakAmplitude;
-                } else {
-                    // High-freq only (low-freq pause)
-                    timings[i] = buzzDuration;
-                    amplitudes[i] = Math.max(1, baseAmplitude);
+                // Add slight variation per cycle for more organic feel
+                float cycleVariation = 0.9f + 0.2f * (float) Math.sin(cyclePhase * Math.PI * 2);
+
+                // === Low frequency portion (segments 0-3): deep rumble ===
+                // Attack phase
+                timings[baseIdx] = 30 + (int)(25 * lowIntensity);
+                amplitudes[baseIdx] = Math.min(255, (int)(effectiveLowFreq * 0.75f * cycleVariation));
+
+                // Peak phase
+                timings[baseIdx + 1] = 45 + (int)(35 * lowIntensity);
+                amplitudes[baseIdx + 1] = Math.min(255, (int)(effectiveLowFreq * cycleVariation));
+
+                // Sustain phase
+                timings[baseIdx + 2] = 35 + (int)(20 * lowIntensity);
+                amplitudes[baseIdx + 2] = Math.min(255, (int)(effectiveLowFreq * 0.85f * cycleVariation));
+
+                // Decay phase (blend towards high freq)
+                timings[baseIdx + 3] = 25;
+                int blendAmplitude = (int)((effectiveLowFreq * 0.4f + effectiveHighFreq * 0.3f) * cycleVariation);
+                amplitudes[baseIdx + 3] = Math.max(1, Math.min(255, blendAmplitude));
+
+                // === High frequency portion (segments 4-8): rapid buzz ===
+                for (int j = 0; j < 5; j++) {
+                    float burstPhase = (float) j / 5;
+                    boolean isOnBurst = (j % 2 == 0);
+
+                    if (isOnBurst) {
+                        // Sharp burst
+                        timings[baseIdx + 4 + j] = 12 + (int)(10 * highIntensity);
+                        float burstIntensity = 0.9f + 0.1f * (float) Math.sin(burstPhase * Math.PI * 4);
+                        amplitudes[baseIdx + 4 + j] = Math.min(255,
+                            (int)(effectiveHighFreq * burstIntensity * cycleVariation));
+                    } else {
+                        // Brief dip (not complete silence)
+                        timings[baseIdx + 4 + j] = 8 + (int)(6 * (1.0f - highIntensity));
+                        // Maintain underlying rumble during gaps
+                        int gapAmplitude = (int)(effectiveHighFreq * 0.3f + effectiveLowFreq * 0.2f);
+                        amplitudes[baseIdx + 4 + j] = Math.max(1, Math.min(255, gapAmplitude));
+                    }
                 }
+
+                // === Transition segment (9): bridge to next cycle ===
+                timings[baseIdx + 9] = 15 + (int)(10 * (1.0f - Math.max(lowIntensity, highIntensity)));
+                int transitionAmplitude = (int)((effectiveLowFreq + effectiveHighFreq) * 0.15f);
+                amplitudes[baseIdx + 9] = Math.max(1, Math.min(255, transitionAmplitude));
             }
 
             return VibrationEffect.createWaveform(timings, amplitudes, 0);
 
         } else if (effectiveLowFreq > 0) {
             // Only low frequency motor: simulate deep, heavy rumble
-            // XInput left motor creates a slow "thump...thump...thump" sensation
-            // Key: VERY LONG pauses between pulses to make it feel slow and heavy
+            // XInput left motor: ~25Hz = ~40ms period
+            // Create very slow, heavy pulses that feel like a thumping bass
 
-            // 4 segments: [STRONG PULSE] [SILENCE] [STRONG PULSE] [SILENCE]
-            int numSegments = 4;
+            int numSegments = 8;
             long[] timings = new long[numSegments];
             int[] amplitudes = new int[numSegments];
 
-            // Scale pulse duration with intensity
-            int pulseDuration = 150 + (int)(100 * lowIntensity);  // 150-250ms pulse
-            int pauseDuration = 100 + (int)(150 * (1.0f - lowIntensity));  // 100-250ms pause
+            // Much longer pulses for low frequency feel (total ~320-480ms per cycle)
+            // This creates a slow "thump-thump" sensation
+            int basePulseTime = 40 + (int)(20 * lowIntensity);
 
             for (int i = 0; i < numSegments; i++) {
+                float phase = (float) i / numSegments;
+
+                // Simple slow wave pattern - clear on/off feel
+                // Even segments: strong, long pulse
+                // Odd segments: weak or off
                 if (i % 2 == 0) {
-                    // Strong pulse - LONG duration
-                    timings[i] = pulseDuration;
-                    amplitudes[i] = effectiveLowFreq;
+                    // Strong pulse - LONG duration for low freq feel
+                    timings[i] = basePulseTime * 2;  // 80-120ms on
+                    float pulseStrength = 0.85f + 0.15f * (float)Math.cos(phase * Math.PI);
+                    amplitudes[i] = Math.min(255, (int)(effectiveLowFreq * pulseStrength));
                 } else {
-                    // Complete silence - LONG pause (this is the key difference!)
-                    timings[i] = pauseDuration;
-                    amplitudes[i] = 0;  // Complete silence
+                    // Gap/weak phase - also long to maintain slow rhythm
+                    timings[i] = basePulseTime;  // 40-60ms gap
+                    amplitudes[i] = Math.max(1, (int)(effectiveLowFreq * 0.2f));
                 }
             }
 
             return VibrationEffect.createWaveform(timings, amplitudes, 0);
 
         } else {
-            // Only high frequency motor: rapid continuous buzz
-            // XInput right motor creates an almost continuous "bzzzzzz" sensation
-            // Key: Almost NO pauses, just slight amplitude variation
+            // Only high frequency motor: rapid buzz pattern
+            // XInput right motor: ~120Hz = ~8ms period
+            // Create very fast, short pulses that feel like buzzing
 
-            // Many segments with minimal gaps for continuous feel
-            int numSegments = 8;
+            int numSegments = 16;
             long[] timings = new long[numSegments];
             int[] amplitudes = new int[numSegments];
 
-            // Very short timing for continuous buzz feel
-            int segmentDuration = 15 + (int)(10 * highIntensity);  // 15-25ms each
+            // Very short pulses for high frequency feel (total ~160-240ms per cycle)
+            // This creates a rapid "buzz-buzz-buzz" sensation
+            int basePulseLength = 8 + (int)(7 * highIntensity);
 
             for (int i = 0; i < numSegments; i++) {
-                timings[i] = segmentDuration;
-                // Slight amplitude variation for texture, but never drops below 60%
-                float variation = 0.6f + 0.4f * (float)Math.abs(Math.sin(i * Math.PI / 2));
-                amplitudes[i] = Math.max(1, (int)(effectiveHighFreq * variation));
+                float phase = (float) i / numSegments;
+
+                // Rapid alternating pattern - very fast on/off
+                if (i % 2 == 0) {
+                    // Short burst
+                    timings[i] = basePulseLength;  // 8-15ms
+                    float burstStrength = 0.8f + 0.2f * (float)Math.sin(phase * Math.PI * 4);
+                    amplitudes[i] = Math.min(255, (int)(effectiveHighFreq * burstStrength));
+                } else {
+                    // Very brief gap
+                    timings[i] = Math.max(5, basePulseLength / 2);  // 4-7ms
+                    amplitudes[i] = Math.max(1, (int)(effectiveHighFreq * 0.3f));
+                }
             }
 
             return VibrationEffect.createWaveform(timings, amplitudes, 0);

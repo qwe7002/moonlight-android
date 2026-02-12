@@ -3,6 +3,9 @@
 //! This module provides callback functions for video decoding, audio rendering,
 //! and connection events that bridge between moonlight-common-c and the JNI layer.
 
+#![allow(dead_code)]
+#![allow(static_mut_refs)]
+
 use crate::ffi::*;
 use crate::jni_helpers::*;
 use crate::opus::*;
