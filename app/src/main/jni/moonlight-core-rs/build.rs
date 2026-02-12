@@ -2,10 +2,105 @@
 //!
 //! This script compiles moonlight-common-c and libopus using the cc crate for reliable cross-compilation.
 //! It automatically downloads the latest moonlight-common-c source from GitHub if not present.
+//!
+//! Dependencies versions are managed in `deps.toml` file.
 
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::collections::HashMap;
+
+/// Dependency configuration loaded from deps.toml
+#[derive(Debug, Clone)]
+struct DepConfig {
+    repo: String,
+    version: String,
+}
+
+/// Load dependency configurations from deps.toml
+fn load_deps_config(manifest_dir: &PathBuf) -> HashMap<String, DepConfig> {
+    let deps_file = manifest_dir.join("deps.toml");
+    let mut deps = HashMap::new();
+
+    // Default configurations (fallback if deps.toml is missing)
+    deps.insert("moonlight-common-c".to_string(), DepConfig {
+        repo: "https://github.com/moonlight-stream/moonlight-common-c.git".to_string(),
+        version: "master".to_string(),
+    });
+    deps.insert("opus".to_string(), DepConfig {
+        repo: "https://github.com/xiph/opus.git".to_string(),
+        version: "v1.6.1".to_string(),
+    });
+
+    if !deps_file.exists() {
+        println!("cargo:warning=deps.toml not found, using default dependency versions");
+        return deps;
+    }
+
+    // Rerun if deps.toml changes
+    println!("cargo:rerun-if-changed={}", deps_file.display());
+
+    let content = match fs::read_to_string(&deps_file) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("cargo:warning=Failed to read deps.toml: {}, using defaults", e);
+            return deps;
+        }
+    };
+
+    // Simple TOML parser for our specific format
+    let mut current_section = String::new();
+    let mut current_repo = String::new();
+    let mut current_version = String::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+
+        // Skip comments and empty lines
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+
+        // Section header
+        if line.starts_with('[') && line.ends_with(']') {
+            // Save previous section if complete
+            if !current_section.is_empty() && !current_repo.is_empty() && !current_version.is_empty() {
+                deps.insert(current_section.clone(), DepConfig {
+                    repo: current_repo.clone(),
+                    version: current_version.clone(),
+                });
+            }
+
+            current_section = line[1..line.len()-1].to_string();
+            current_repo.clear();
+            current_version.clear();
+            continue;
+        }
+
+        // Key-value pairs
+        if let Some(pos) = line.find('=') {
+            let key = line[..pos].trim();
+            let value = line[pos+1..].trim().trim_matches('"');
+
+            match key {
+                "repo" => current_repo = value.to_string(),
+                "version" => current_version = value.to_string(),
+                _ => {}
+            }
+        }
+    }
+
+    // Save last section
+    if !current_section.is_empty() && !current_repo.is_empty() && !current_version.is_empty() {
+        deps.insert(current_section, DepConfig {
+            repo: current_repo,
+            version: current_version,
+        });
+    }
+
+    deps
+}
 
 /// Check if this is a release build
 fn is_release_build() -> bool {
@@ -49,6 +144,9 @@ fn main() {
     let target = env::var("TARGET").unwrap();
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
+    // Load dependency versions from deps.toml
+    let deps_config = load_deps_config(&manifest_dir);
+
     // Use a stable path for downloaded dependencies (not OUT_DIR which changes with each build)
     let deps_dir = manifest_dir.join("target").join("deps");
     std::fs::create_dir_all(&deps_dir).ok();
@@ -69,12 +167,19 @@ fn main() {
         return;
     }
 
-    // Download moonlight-common-c if not present
-    download_moonlight_common_c(&moonlight_common_c_dir);
+    // Download moonlight-common-c if not present (with version from config)
+    let mlc_config = deps_config.get("moonlight-common-c").cloned().unwrap_or(DepConfig {
+        repo: "https://github.com/moonlight-stream/moonlight-common-c.git".to_string(),
+        version: "master".to_string(),
+    });
+    download_moonlight_common_c(&moonlight_common_c_dir, &mlc_config);
 
-
-    // Build opus library
-    build_opus();
+    // Build opus library (with version from config)
+    let opus_config = deps_config.get("opus").cloned().unwrap_or(DepConfig {
+        repo: "https://github.com/xiph/opus.git".to_string(),
+        version: "v1.6.1".to_string(),
+    });
+    build_opus(&opus_config);
 
     // Build enet library
     let enet_dir = moonlight_common_c_dir.join("enet");
@@ -144,7 +249,7 @@ fn main() {
 }
 
 /// Build libopus using cc crate
-fn build_opus() {
+fn build_opus(config: &DepConfig) {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
@@ -157,8 +262,8 @@ fn build_opus() {
     let opus_dir = if project_opus_dir.exists() {
         project_opus_dir
     } else {
-        // Download opus source directly to deps directory
-        download_opus(&deps_dir)
+        // Download opus source directly to deps directory (with version from config)
+        download_opus(&deps_dir, config)
     };
 
     if !opus_dir.exists() {
@@ -421,27 +526,41 @@ fn build_opus() {
 }
 
 
-/// Download opus source code
-fn download_opus(out_dir: &PathBuf) -> PathBuf {
+/// Download opus source code with version from config
+fn download_opus(out_dir: &PathBuf, config: &DepConfig) -> PathBuf {
     use std::process::Command;
 
     let opus_dir = out_dir.join("opus");
 
+    // Check if already downloaded with correct version
+    let version_file = opus_dir.join(".downloaded_version");
     if opus_dir.exists() && opus_dir.join("include").exists() {
-        return opus_dir;
+        if let Ok(existing_version) = fs::read_to_string(&version_file) {
+            if existing_version.trim() == config.version {
+                return opus_dir;
+            }
+            // Version mismatch, remove and re-download
+            println!("cargo:warning=opus version changed from {} to {}, re-downloading...",
+                     existing_version.trim(), config.version);
+            let _ = fs::remove_dir_all(&opus_dir);
+        } else {
+            // No version file but directory exists, assume it's correct
+            return opus_dir;
+        }
     }
 
-    // Clone opus from git
-    let opus_version = "v1.6.1";
+    // Clone opus from git with version from config
     let status = Command::new("git")
-        .args(&["clone", "--depth", "1", "--branch", opus_version,
-                "https://github.com/xiph/opus.git"])
+        .args(&["clone", "--depth", "1", "--branch", &config.version,
+                &config.repo])
         .arg(&opus_dir)
         .status();
 
     match status {
         Ok(s) if s.success() => {
-            println!("cargo:warning=Downloaded opus source to {:?}", opus_dir);
+            println!("cargo:warning=Downloaded opus {} to {:?}", config.version, opus_dir);
+            // Write version file for future checks
+            let _ = fs::write(&version_file, &config.version);
         }
         _ => {
             eprintln!("Failed to download opus source");
@@ -451,35 +570,86 @@ fn download_opus(out_dir: &PathBuf) -> PathBuf {
     opus_dir
 }
 
-/// Download moonlight-common-c from GitHub
-fn download_moonlight_common_c(target_dir: &PathBuf) {
-    let repo_url = "https://github.com/moonlight-stream/moonlight-common-c.git";
-
-    // If directory already exists with source files, skip download
+/// Download moonlight-common-c from GitHub with version from config
+fn download_moonlight_common_c(target_dir: &PathBuf, config: &DepConfig) {
+    // Check if already downloaded with correct version
+    let version_file = target_dir.join(".downloaded_version");
     if target_dir.exists() && target_dir.join("src").exists() {
-        return;
+        if let Ok(existing_version) = fs::read_to_string(&version_file) {
+            if existing_version.trim() == config.version {
+                return;
+            }
+            // Version mismatch, remove and re-download
+            println!("cargo:warning=moonlight-common-c version changed from {} to {}, re-downloading...",
+                     existing_version.trim(), config.version);
+            let _ = fs::remove_dir_all(target_dir);
+        } else {
+            // No version file but directory exists, assume it's correct
+            return;
+        }
     }
 
-    println!("cargo:warning=Downloading moonlight-common-c from GitHub...");
+    println!("cargo:warning=Downloading moonlight-common-c {} from GitHub...", config.version);
 
     // Remove directory if it exists but is incomplete
     if target_dir.exists() {
-        let _ = std::fs::remove_dir_all(target_dir);
+        let _ = fs::remove_dir_all(target_dir);
     }
 
-    let status = Command::new("git")
-        .args([
-            "clone",
-            "--recursive",
-            "--depth", "1",
-            repo_url,
-        ])
-        .arg(target_dir)
-        .status();
+    // Determine if version is a branch (master/main) or a specific ref (tag/commit)
+    let is_branch = config.version == "master" || config.version == "main";
+
+    let status = if is_branch {
+        Command::new("git")
+            .args([
+                "clone",
+                "--recursive",
+                "--depth", "1",
+                "--branch", &config.version,
+                &config.repo,
+            ])
+            .arg(target_dir)
+            .status()
+    } else {
+        // For specific commit or tag, clone without depth limit then checkout
+        let clone_status = Command::new("git")
+            .args([
+                "clone",
+                "--recursive",
+                &config.repo,
+            ])
+            .arg(target_dir)
+            .status();
+
+        if let Ok(s) = &clone_status {
+            if s.success() {
+                // Checkout specific version
+                let checkout_status = Command::new("git")
+                    .args(["checkout", &config.version])
+                    .current_dir(target_dir)
+                    .status();
+
+                // Update submodules for the checked out version
+                let _ = Command::new("git")
+                    .args(["submodule", "update", "--init", "--recursive"])
+                    .current_dir(target_dir)
+                    .status();
+
+                checkout_status
+            } else {
+                clone_status
+            }
+        } else {
+            clone_status
+        }
+    };
 
     match status {
         Ok(s) if s.success() => {
-            println!("cargo:warning=Successfully downloaded moonlight-common-c to {:?}", target_dir);
+            println!("cargo:warning=Successfully downloaded moonlight-common-c {} to {:?}",
+                     config.version, target_dir);
+            // Write version file for future checks
+            let _ = fs::write(&version_file, &config.version);
         }
         Ok(s) => {
             panic!("Failed to clone moonlight-common-c: git exited with status {}", s);

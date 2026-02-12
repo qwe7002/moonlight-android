@@ -1,0 +1,18 @@
+# External C/C++ Dependencies Configuration
+# This file centralizes version management for native dependencies
+# Edit versions here instead of modifying build.rs
+
+[moonlight-common-c]
+# GitHub repository
+repo = "https://github.com/moonlight-stream/moonlight-common-c.git"
+# Use a specific commit hash or tag for reproducible builds
+# Check https://github.com/moonlight-stream/moonlight-common-c/commits/master for latest
+version = "master"
+# Alternatively, use a specific commit:
+# version = "abc1234567890"
+
+[opus]
+# GitHub repository
+repo = "https://github.com/xiph/opus.git"
+# Version tag (check https://github.com/xiph/opus/releases)
+version = "v1.6.1"

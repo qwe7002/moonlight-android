@@ -53,6 +53,34 @@ These need to be linked with:
 - libopus
 - libssl / libcrypto
 
+## Dependency Version Management
+
+External C/C++ dependencies are managed via `deps.toml`:
+
+```toml
+[moonlight-common-c]
+repo = "https://github.com/moonlight-stream/moonlight-common-c.git"
+version = "master"  # or specific commit hash/tag
+
+[opus]
+repo = "https://github.com/xiph/opus.git"
+version = "v1.6.1"
+```
+
+### Updating Dependencies
+
+1. Edit `deps.toml` to change version numbers
+2. Delete `target/deps/` to force re-download
+3. Rebuild with `cargo build`
+
+### Version Formats
+
+- **Branch**: `master`, `main` - uses shallow clone with `--depth 1`
+- **Tag**: `v1.6.1` - clones and checks out the specific tag
+- **Commit**: `abc123...` - clones and checks out the specific commit
+
+The build system automatically tracks downloaded versions in `.downloaded_version` files and re-downloads when versions change.
+
 ## API Compatibility
 
 All JNI functions maintain the same signatures as the original C implementation, ensuring drop-in compatibility with the Java code in `com.limelight.nvstream.jni.MoonBridge`.
