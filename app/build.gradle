@@ -74,13 +74,13 @@ android {
 
 // Determine Cargo profile based on build type
 def isReleaseBuild = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
-//def cargoProfile = isReleaseBuild ? "release" : "debug"
+def cargoProfile = isReleaseBuild ? "release" : "debug"
 
 cargo {
     module = "./src/main/jni/moonlight-core-rs"
     libname = "moonlight_core"
     targets = ["arm64"]
-    profile = "release"
+    profile = cargoProfile
     targetDirectory = "./src/main/jni/moonlight-core-rs/target"
 }
 

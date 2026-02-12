@@ -6,27 +6,6 @@ Rust implementation of the moonlight-core native library for Android.
 
 This is a Rust port of the C code in `moonlight-core`, providing JNI bindings for the Moonlight streaming client. The external library `moonlight-common-c` is included and compiled via the cc crate.
 
-## Structure
-
-```
-moonlight-core-rs/
-├── Cargo.toml           # Rust package configuration
-├── build.rs             # Build script (compiles moonlight-common-c and opus)
-├── wrapper.h            # C header wrapper for bindgen
-├── build-android.sh     # Build script (Linux/macOS)
-├── build-android.ps1    # Build script (Windows)
-├── moonlight-common-c/  # moonlight-common-c library source
-└── src/
-    ├── lib.rs           # Main library entry point
-    ├── ffi.rs           # FFI bindings to moonlight-common-c and Opus
-    ├── opus.rs          # Opus decoder FFI bindings
-    ├── crypto.rs        # Crypto implementation using ring
-    ├── usb_ids.rs       # USB vendor/product ID constants
-    ├── controller.rs    # Controller type detection
-    ├── callbacks.rs     # Video/audio/connection callbacks
-    └── jni_bridge.rs    # JNI function implementations
-```
-
 ## Building
 
 ### Prerequisites
