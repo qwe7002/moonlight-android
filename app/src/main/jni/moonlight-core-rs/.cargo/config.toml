@@ -1,0 +1,15 @@
+[build]
+# Target for local development (host)
+# For Android builds, use cargo-ndk which handles toolchain setup automatically
+
+[env]
+# Use Ninja as the CMake generator for faster builds
+# This affects audiopus_sys which uses cmake to build libopus
+CMAKE_GENERATOR = "Ninja"
+
+# Fix CMake compatibility with older CMakeLists.txt (opus uses cmake_minimum_required < 3.5)
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+
+# These will be overridden by cargo-ndk
+# ANDROID_NDK_HOME is required
+
