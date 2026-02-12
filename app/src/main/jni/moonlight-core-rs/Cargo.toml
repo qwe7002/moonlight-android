@@ -16,7 +16,8 @@ libc = "0.2"
 # Ring for crypto operations (pure Rust, good cross-compilation support)
 ring = "0.17"
 # AES-CBC support (ring doesn't support CBC mode)
-aes = "0.8"
+# Enable hardware acceleration (AES-NI on x86, ARMv8 Crypto Extensions on ARM)
+aes = { version = "0.8", features = ["hazmat"] }
 cbc = "0.1"
 # Logging support
 log = "0.4"
@@ -48,4 +49,6 @@ strip = false
 overflow-checks = false
 # No debug symbols in release
 debug = false
+
+# Note: Hardware AES acceleration flags are configured in .cargo/config.toml
 

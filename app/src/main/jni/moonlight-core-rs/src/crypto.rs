@@ -125,22 +125,18 @@ pub extern "C" fn PltEncryptMessage(
                 Err(_) => return false,
             };
 
-            // Prepare buffer for in-place encryption
-            let mut in_out = vec![0u8; input_data_length as usize];
-            if input_data_length > 0 {
+            // Use output buffer directly for in-place encryption (avoid heap allocation)
+            let input_len = input_data_length as usize;
+            let output_slice = unsafe { std::slice::from_raw_parts_mut(output_data, input_len) };
+
+            if input_len > 0 {
                 unsafe {
-                    ptr::copy_nonoverlapping(input_data, in_out.as_mut_ptr(), input_data_length as usize);
+                    ptr::copy_nonoverlapping(input_data, output_data, input_len);
                 }
             }
 
-            match less_safe_key.seal_in_place_separate_tag(nonce, Aad::empty(), &mut in_out) {
+            match less_safe_key.seal_in_place_separate_tag(nonce, Aad::empty(), output_slice) {
                 Ok(actual_tag) => {
-                    // Copy ciphertext
-                    if input_data_length > 0 {
-                        unsafe {
-                            ptr::copy_nonoverlapping(in_out.as_ptr(), output_data, input_data_length as usize);
-                        }
-                    }
                     // Copy tag
                     unsafe {
                         ptr::copy_nonoverlapping(actual_tag.as_ref().as_ptr(), tag, tag_length as usize);
@@ -175,30 +171,30 @@ pub extern "C" fn PltEncryptMessage(
                 input_len
             };
 
-            // Create buffer for encryption
-            let mut buffer = vec![0u8; padded_len];
-            if input_len > 0 {
-                unsafe {
-                    ptr::copy_nonoverlapping(input_data, buffer.as_mut_ptr(), input_len);
-                }
-            }
-
-            // Create encryptor and encrypt
+            // Create encryptor and encrypt directly using output buffer
             let encryptor = Aes128CbcEnc::new_from_slices(key_slice, iv_slice);
             match encryptor {
                 Ok(enc) => {
+                    // Use output buffer directly to avoid extra allocation
+                    let output_slice = unsafe { std::slice::from_raw_parts_mut(output_data, padded_len) };
+
+                    // Copy input to output for in-place encryption
+                    if input_len > 0 {
+                        unsafe {
+                            ptr::copy_nonoverlapping(input_data, output_data, input_len);
+                        }
+                    }
+
                     let result = if (flags & CIPHER_FLAG_PAD_TO_BLOCK_SIZE) != 0 {
-                        enc.encrypt_padded_mut::<aes::cipher::block_padding::Pkcs7>(&mut buffer, input_len)
+                        enc.encrypt_padded_mut::<aes::cipher::block_padding::Pkcs7>(output_slice, input_len)
                     } else {
-                        enc.encrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut buffer, input_len)
+                        enc.encrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(output_slice, input_len)
                     };
 
                     match result {
                         Ok(encrypted) => {
-                            let encrypted_len = encrypted.len();
                             unsafe {
-                                ptr::copy_nonoverlapping(encrypted.as_ptr(), output_data, encrypted_len);
-                                *output_data_length = encrypted_len as i32;
+                                *output_data_length = encrypted.len() as i32;
                             }
                             true
                         }
@@ -269,25 +265,60 @@ pub extern "C" fn PltDecryptMessage(
             };
 
             // Combine ciphertext and tag for decryption
+            // Use stack buffer for small packets to avoid heap allocation
             let total_len = input_data_length as usize + tag_length as usize;
-            let mut in_out = vec![0u8; total_len];
-            if input_data_length > 0 {
-                unsafe {
-                    ptr::copy_nonoverlapping(input_data, in_out.as_mut_ptr(), input_data_length as usize);
-                }
-            }
-            unsafe {
-                ptr::copy_nonoverlapping(tag, in_out.as_mut_ptr().add(input_data_length as usize), tag_length as usize);
-            }
+            const STACK_BUF_SIZE: usize = 2048; // Most video/audio packets fit in this
 
-            match less_safe_key.open_in_place(nonce, Aad::empty(), &mut in_out) {
-                Ok(decrypted) => {
-                    let decrypted_len = decrypted.len();
-                    if decrypted_len > 0 {
-                        unsafe {
-                            ptr::copy_nonoverlapping(decrypted.as_ptr(), output_data, decrypted_len);
-                        }
+            let result = if total_len <= STACK_BUF_SIZE {
+                // Use stack buffer for small data
+                let mut stack_buf = [0u8; STACK_BUF_SIZE];
+                let in_out = &mut stack_buf[..total_len];
+
+                if input_data_length > 0 {
+                    unsafe {
+                        ptr::copy_nonoverlapping(input_data, in_out.as_mut_ptr(), input_data_length as usize);
                     }
+                }
+                unsafe {
+                    ptr::copy_nonoverlapping(tag, in_out.as_mut_ptr().add(input_data_length as usize), tag_length as usize);
+                }
+
+                less_safe_key.open_in_place(nonce, Aad::empty(), in_out)
+                    .map(|decrypted| {
+                        let decrypted_len = decrypted.len();
+                        if decrypted_len > 0 {
+                            unsafe {
+                                ptr::copy_nonoverlapping(decrypted.as_ptr(), output_data, decrypted_len);
+                            }
+                        }
+                        decrypted_len
+                    })
+            } else {
+                // Fall back to heap allocation for large data
+                let mut in_out = vec![0u8; total_len];
+                if input_data_length > 0 {
+                    unsafe {
+                        ptr::copy_nonoverlapping(input_data, in_out.as_mut_ptr(), input_data_length as usize);
+                    }
+                }
+                unsafe {
+                    ptr::copy_nonoverlapping(tag, in_out.as_mut_ptr().add(input_data_length as usize), tag_length as usize);
+                }
+
+                less_safe_key.open_in_place(nonce, Aad::empty(), &mut in_out)
+                    .map(|decrypted| {
+                        let decrypted_len = decrypted.len();
+                        if decrypted_len > 0 {
+                            unsafe {
+                                ptr::copy_nonoverlapping(decrypted.as_ptr(), output_data, decrypted_len);
+                            }
+                        }
+                        decrypted_len
+                    })
+            };
+
+            match result {
+                Ok(decrypted_len) => {
                     unsafe {
                         *output_data_length = decrypted_len as i32;
                     }

@@ -12,3 +12,11 @@ CMAKE_POLICY_VERSION_MINIMUM = "3.5"
 # Note: ANDROID_NDK_HOME, CC, AR, LINKER etc. are set by rust-android-gradle plugin
 # Do not set them here as they will be overridden
 
+# ============================================================================
+# Hardware AES Acceleration (Target-specific rustflags)
+# ============================================================================
+
+# ARMv8 Crypto Extensions (most modern Android devices 64-bit)
+# Enables hardware AES-NI and SHA2 instructions
+[target.aarch64-linux-android]
+rustflags = ["-C", "target-feature=+aes,+sha2,+neon"]
