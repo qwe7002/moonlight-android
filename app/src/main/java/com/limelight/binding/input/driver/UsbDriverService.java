@@ -136,7 +136,6 @@ public class UsbDriverService extends Service implements UsbDriverListener {
     }
 
     private void handleUsbDeviceState(UsbDevice device) {
-        //LimeLog.info("handleUsbDeviceState called for: " + device.getDeviceName());
         Log.i(TAG, "handleUsbDeviceState called for: " + device.getDeviceName() +
                 " VID: 0x" + Integer.toHexString(device.getVendorId()) +
                 " PID: 0x" + Integer.toHexString(device.getProductId()) +
@@ -172,10 +171,8 @@ public class UsbDriverService extends Service implements UsbDriverListener {
                     i.setPackage(getPackageName());
 
                     usbManager.requestPermission(device, PendingIntent.getBroadcast(UsbDriverService.this, 0, i, intentFlags));
-                    //LimeLog.info("Permission request sent for device: " + device.getDeviceName());
                     Log.i(TAG, "Permission request sent for device: " + device.getDeviceName());
                 } catch (SecurityException e) {
-                    //LimeLog.warning("SecurityException when requesting USB permission: " + e.getMessage());
                     Log.w(TAG, "SecurityException when requesting USB permission: " + e.getMessage(), e);
                     Toast.makeText(this, this.getText(R.string.error_usb_prohibited), Toast.LENGTH_LONG).show();
                     if (stateListener != null) {
@@ -185,13 +182,11 @@ public class UsbDriverService extends Service implements UsbDriverListener {
                 return;
             }
 
-            //LimeLog.info("Permission already granted for device: " + device.getDeviceName());
             Log.i(TAG, "Permission already granted for device: " + device.getDeviceName());
 
             // Open the device
             UsbDeviceConnection connection = usbManager.openDevice(device);
             if (connection == null) {
-                //LimeLog.warning("Unable to open USB device: "+device.getDeviceName());
                 Log.w(TAG, "Unable to open USB device: " + device.getDeviceName());
                 return;
             }
@@ -241,27 +236,12 @@ public class UsbDriverService extends Service implements UsbDriverListener {
         return false;
     }
 
-    public static boolean kernelSupportsXboxOne() {
-        // The next AOSP common kernel is 4.14 which has working Xbox One controller support
-        return true;
-
-    }
-
-    public static boolean kernelSupportsXbox360W() {
-        // We know we have a kernel that should set Xbox 360 wireless LEDs, but we still don't
-        // know if CONFIG_JOYSTICK_XPAD_LEDS was enabled during the kernel build. Unfortunately
-        // it's not possible to detect this reliably due to Android's app sandboxing. Reading
-        // /proc/config.gz and enumerating /sys/class/leds are both blocked by SELinux on any
-        // relatively modern device. We will assume that CONFIG_JOYSTICK_XPAD_LEDS=y on these
-        // kernels and users can override by using the settings option to claim all devices.
-        return true;
-    }
 
     public static boolean shouldClaimDevice(UsbDevice device, boolean claimAllAvailable) {
-        return ((!kernelSupportsXboxOne() || !isRecognizedInputDevice(device) || claimAllAvailable) && XboxOneController.canClaimDevice(device)) ||
+        return ((!isRecognizedInputDevice(device) || claimAllAvailable) && XboxOneController.canClaimDevice(device)) ||
                 ((!isRecognizedInputDevice(device) || claimAllAvailable) && Xbox360Controller.canClaimDevice(device)) ||
                 // We must not call isRecognizedInputDevice() because wireless controllers don't share the same product ID as the dongle
-                ((!kernelSupportsXbox360W() || claimAllAvailable) && Xbox360WirelessDongle.canClaimDevice(device));
+                ((claimAllAvailable) && Xbox360WirelessDongle.canClaimDevice(device));
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
