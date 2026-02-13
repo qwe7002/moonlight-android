@@ -14,11 +14,11 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 libc = "0.2"
 # Ring for crypto operations (pure Rust, good cross-compilation support)
-ring = "0.17"
+ring = "0.17.14"
 # AES-CBC support (ring doesn't support CBC mode)
-# Enable hardware acceleration (AES-NI on x86, ARMv8 Crypto Extensions on ARM)
-aes = { version = "0.8", features = ["hazmat"] }
-cbc = "0.1"
+# Enable hardware acceleration (ARMv8 Crypto Extensions on ARM)
+aes = { version = "0.8.4", features = ["hazmat"] }
+cbc = "0.1.2"
 # Logging support
 log = "0.4"
 
