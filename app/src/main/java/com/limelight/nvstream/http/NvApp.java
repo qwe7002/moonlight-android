@@ -2,7 +2,10 @@ package com.limelight.nvstream.http;
 
 import android.util.Log;
 
+import androidx.annotation.NonNull;
+
 public class NvApp {
+    @SuppressWarnings("FieldCanBeLocal")
     private final String TAG = "NvApp";
     private String appName = "";
     private int appId;
@@ -36,10 +39,10 @@ public class NvApp {
         }
     }
 
-    public void setAppId(int appId) {
+/*    public void setAppId(int appId) {
         this.appId = appId;
         this.initialized = true;
-    }
+    }*/
 
     public void setHdrSupported(boolean hdrSupported) {
         this.hdrSupported = hdrSupported;
@@ -61,6 +64,7 @@ public class NvApp {
         return this.initialized;
     }
 
+    @NonNull
     @Override
     public String toString() {
         return "Name: " + appName + "\n" +

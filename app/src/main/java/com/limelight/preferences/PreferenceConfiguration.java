@@ -106,10 +106,6 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_ENABLE_MDNS = false;
     private static final String DEFAULT_ENCRYPTION_MODE = "enabled";
 
-    // Encryption mode values
-    public static final String ENCRYPTION_MODE_ENABLED = "enabled";
-    public static final String ENCRYPTION_MODE_DISABLED_VPN = "disabled_vpn";
-    public static final String ENCRYPTION_MODE_DISABLED_ALWAYS = "disabled_always";
 
     public static final int FRAME_PACING_MIN_LATENCY = 0;
     public static final int FRAME_PACING_BALANCED = 1;
@@ -363,7 +359,6 @@ public class PreferenceConfiguration {
         return prefs.getBoolean(AUTO_BITRATE_PREF_STRING, DEFAULT_AUTO_BITRATE);
     }
 
-    @SuppressWarnings("deprecation")
     public static int getDefaultBitrate(Context context) {
         SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
         return getDefaultBitrate(
