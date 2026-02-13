@@ -2,9 +2,10 @@ package com.limelight.preferences;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.hardware.display.DisplayManager;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
-import android.os.Build;
+import android.util.Log;
 import android.view.Display;
 
 import com.limelight.nvstream.jni.MoonBridge;
@@ -224,10 +225,6 @@ public class PreferenceConfiguration {
         }
     }
 
-    public static int getDefaultBitrate(String resString, String fpsString) {
-        return getDefaultBitrate(resString, fpsString, FormatOption.AUTO);
-    }
-
     /**
      * Detects the best available decoder on the device.
      * Priority: AV1 > HEVC
@@ -346,6 +343,170 @@ public class PreferenceConfiguration {
     public static boolean getDefaultSmallMode(Context context) {
         // Use small mode on anything smaller than a 7" tablet
         return context.getResources().getConfiguration().smallestScreenWidthDp < 500;
+    }
+
+    /**
+     * Device display information for resolution and FPS detection
+     */
+    public static class DeviceDisplayInfo {
+        public final int width;
+        public final int height;
+        public final float refreshRate;
+        public final String recommendedResolution;
+        public final int recommendedFps;
+
+        public DeviceDisplayInfo(int width, int height, float refreshRate,
+                                 String recommendedResolution, int recommendedFps) {
+            this.width = width;
+            this.height = height;
+            this.refreshRate = refreshRate;
+            this.recommendedResolution = recommendedResolution;
+            this.recommendedFps = recommendedFps;
+        }
+    }
+
+    /**
+     * Detect device display information and recommend optimal resolution and FPS.
+     *
+     * @param context Application context
+     * @return DeviceDisplayInfo containing display details and recommendations
+     */
+    public static DeviceDisplayInfo detectDeviceDisplayInfo(Context context) {
+        int displayWidth = 1920;
+        int displayHeight = 1080;
+        float maxRefreshRate = 60f;
+
+        try {
+            DisplayManager displayManager = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
+            Display display = displayManager.getDisplay(Display.DEFAULT_DISPLAY);
+
+            if (display != null) {
+                Display.Mode currentMode = display.getMode();
+                displayWidth = currentMode.getPhysicalWidth();
+                displayHeight = currentMode.getPhysicalHeight();
+
+                // Find the maximum refresh rate supported by the display
+                Display.Mode[] supportedModes = display.getSupportedModes();
+                for (Display.Mode mode : supportedModes) {
+                    // Only consider modes with the same or similar resolution
+                    if (mode.getPhysicalWidth() == displayWidth &&
+                            mode.getPhysicalHeight() == displayHeight) {
+                        if (mode.getRefreshRate() > maxRefreshRate) {
+                            maxRefreshRate = mode.getRefreshRate();
+                        }
+                    }
+                }
+
+                Log.i("PreferenceConfiguration", "Display: " + displayWidth + "x" + displayHeight +
+                        " @ " + maxRefreshRate + "Hz");
+            }
+        } catch (Exception e) {
+            Log.e("PreferenceConfiguration", "Failed to detect display info", e);
+        }
+
+        // Determine recommended resolution based on display resolution
+        String recommendedResolution = getRecommendedResolution(displayWidth, displayHeight);
+
+        // Determine recommended FPS based on display refresh rate
+        int recommendedFps = getRecommendedFps(maxRefreshRate);
+
+        return new DeviceDisplayInfo(displayWidth, displayHeight, maxRefreshRate,
+                recommendedResolution, recommendedFps);
+    }
+
+    /**
+     * Get recommended streaming resolution based on display resolution.
+     * We don't want to stream at a higher resolution than the display can show.
+     *
+     * @param displayWidth Display width in pixels
+     * @param displayHeight Display height in pixels
+     * @return Recommended resolution string (e.g., "1920x1080")
+     */
+    public static String getRecommendedResolution(int displayWidth, int displayHeight) {
+        // Normalize to landscape orientation
+        int width = Math.max(displayWidth, displayHeight);
+        int height = Math.min(displayWidth, displayHeight);
+
+        int pixels = width * height;
+
+        // 4K (3840x2160) = 8,294,400 pixels
+        // 1440p (2560x1440) = 3,686,400 pixels
+        // 1080p (1920x1080) = 2,073,600 pixels
+
+        if (pixels >= 8294400) {
+            // 4K or higher display
+            return RES_4K;
+        } else if (pixels >= 3686400) {
+            // 1440p or higher display
+            return RES_1440P;
+        } else {
+            // 1080p or lower display
+            return RES_1080P;
+        }
+    }
+
+    /**
+     * Get recommended FPS based on display refresh rate.
+     *
+     * @param refreshRate Display refresh rate in Hz
+     * @return Recommended FPS (30, 60, 90, 120, etc.)
+     */
+    public static int getRecommendedFps(float refreshRate) {
+        // Round to nearest common FPS value
+        if (refreshRate >= 120) {
+            return 120;
+        } else if (refreshRate >= 90) {
+            return 90;
+        } else if (refreshRate >= 60) {
+            return 60;
+        } else {
+            return 30;
+        }
+    }
+
+    /**
+     * Get the default resolution string based on device display.
+     *
+     * @param context Application context
+     * @return Default resolution string
+     */
+    public static String getDefaultResolutionForDevice(Context context) {
+        DeviceDisplayInfo info = detectDeviceDisplayInfo(context);
+        return info.recommendedResolution;
+    }
+
+    /**
+     * Get the default FPS string based on device display.
+     *
+     * @param context Application context
+     * @return Default FPS string
+     */
+    public static String getDefaultFpsForDevice(Context context) {
+        DeviceDisplayInfo info = detectDeviceDisplayInfo(context);
+        return String.valueOf(info.recommendedFps);
+    }
+
+    /**
+     * Initialize default resolution and FPS based on device capabilities.
+     * This should be called once when the app first runs.
+     *
+     * @param context Application context
+     */
+    public static void initializeDefaultsForDevice(Context context) {
+        SharedPreferences prefs = MMKVPreferenceManager.getDefaultSharedPreferences(context);
+
+        // Check if this is first run (no resolution set yet)
+        if (!prefs.contains(RESOLUTION_PREF_STRING) && !prefs.contains(LEGACY_RES_FPS_PREF_STRING)) {
+            DeviceDisplayInfo info = detectDeviceDisplayInfo(context);
+
+            Log.i("PreferenceConfiguration", "First run - setting defaults based on device: " +
+                    info.recommendedResolution + " @ " + info.recommendedFps + "fps");
+
+            prefs.edit()
+                    .putString(RESOLUTION_PREF_STRING, info.recommendedResolution)
+                    .putString(FPS_PREF_STRING, String.valueOf(info.recommendedFps))
+                    .apply();
+        }
     }
 
     /**

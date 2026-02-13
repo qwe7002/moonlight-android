@@ -19,6 +19,7 @@ import java.util.Set;
 public class MMKVPreferenceManager {
     private static final String DEFAULT_MMKV_ID = "default_preferences";
     private static final String DEFAULTS_INITIALIZED_KEY = "_mmkv_defaults_initialized";
+    private static final String DEVICE_DEFAULTS_INITIALIZED_KEY = "_device_defaults_initialized";
     private static boolean initialized = false;
     private static MMKVPreferenceDataStore dataStoreInstance;
 
@@ -29,7 +30,29 @@ public class MMKVPreferenceManager {
 
             // Initialize default values on first run
             initializeDefaultValues();
+
+            // Initialize device-specific defaults (resolution, FPS) based on display
+            initializeDeviceDefaults(context);
         }
+    }
+
+    /**
+     * Initialize device-specific default values based on display capabilities.
+     * This detects the device's display resolution and refresh rate to set optimal defaults.
+     */
+    private static void initializeDeviceDefaults(Context context) {
+        MMKV mmkv = MMKV.mmkvWithID(DEFAULT_MMKV_ID);
+
+        // Only initialize once
+        if (mmkv.decodeBool(DEVICE_DEFAULTS_INITIALIZED_KEY, false)) {
+            return;
+        }
+
+        // Use PreferenceConfiguration to detect and set device-specific defaults
+        PreferenceConfiguration.initializeDefaultsForDevice(context);
+
+        // Mark device defaults as initialized
+        mmkv.encode(DEVICE_DEFAULTS_INITIALIZED_KEY, true);
     }
 
     /**
