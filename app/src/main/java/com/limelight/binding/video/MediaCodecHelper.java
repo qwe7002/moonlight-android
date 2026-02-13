@@ -220,6 +220,7 @@ public class MediaCodecHelper {
                 (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
         ConfigurationInfo configInfo = activityManager.getDeviceConfigurationInfo();
         if (configInfo.reqGlEsVersion != ConfigurationInfo.GL_ES_VERSION_UNDEFINED) {
+            // FIXME: Use Vulcan API version when we switch to Vulkan for GPU queries instead of relying on GLES version as a proxy for GPU generation. Some devices (like the Xiaomi Mi 10 lite 5G) report GLES 3.1 support but still have broken HEVC decoders, so this is not a perfect heuristic.
             //LimeLog.info("OpenGL ES version: " + configInfo.reqGlEsVersion);
             Log.i(TAG, "OpenGL ES version: " + configInfo.reqGlEsVersion);
 
