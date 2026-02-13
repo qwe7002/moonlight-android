@@ -183,13 +183,13 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
         final VulkanPreferences vulkanPreferences = VulkanPreferences.readPreferences(this);
         if (!vulkanPreferences.savedFingerprint.equals(Build.FINGERPRINT) || vulkanPreferences.VulkanRenderer.isEmpty()) {
             // Use Vulkan to detect GPU renderer
-            String gpuRenderer = VulkanHelper.getGpuRenderer(this);
+            String gpuRenderer = VulkanHelper.getGpuRenderer();
             vulkanPreferences.VulkanRenderer = gpuRenderer;
             vulkanPreferences.savedFingerprint = Build.FINGERPRINT;
             vulkanPreferences.writePreferences();
-            LimeLog.info("Fetched GPU Renderer via Vulkan: " + gpuRenderer);
+            Log.i(TAG, "Fetched GPU Renderer via Vulkan: " + gpuRenderer);
         } else {
-            LimeLog.info("Cached GPU Renderer: " + vulkanPreferences.VulkanRenderer);
+            Log.i(TAG, "Cached GPU Renderer: " + vulkanPreferences.VulkanRenderer);
         }
 
         completeOnCreate();
@@ -283,8 +283,9 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
             // Continue with pairing regardless of whether permission was granted
             // The foreground service will still work, just without notification on Android 13+
             if (pendingPairComputer != null) {
-                startPairingService(pendingPairComputer);
+                final ComputerDetails computer = pendingPairComputer;
                 pendingPairComputer = null;
+                doPair(computer);
             }
         }
     }
@@ -345,11 +346,17 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
 
     private void doPair(final ComputerDetails computer) {
         if (computer.state == ComputerDetails.State.OFFLINE || computer.activeAddress == null) {
-            Toast.makeText(PcView.this, getResources().getString(R.string.pair_pc_offline), Toast.LENGTH_SHORT).show();
+            Dialog.displayDialog(PcView.this,
+                    getResources().getString(R.string.pairing_notification_failed_title),
+                    getResources().getString(R.string.pair_pc_offline),
+                    false);
             return;
         }
         if (managerBinder == null) {
-            Toast.makeText(PcView.this, getResources().getString(R.string.error_manager_not_running), Toast.LENGTH_LONG).show();
+            Dialog.displayDialog(PcView.this,
+                    getResources().getString(R.string.conn_error_title),
+                    getResources().getString(R.string.error_manager_not_running),
+                    false);
             return;
         }
 
@@ -361,7 +368,18 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
             return;
         }
 
-        startPairingService(computer);
+        // Show Sunshine pairing dialog to get credentials
+        Dialog.displaySunshinePairingDialog(this, computer.name, new Dialog.SunshinePairingCallback() {
+            @Override
+            public void onCredentialsEntered(String username, String password) {
+                startPairingService(computer, username, password);
+            }
+
+            @Override
+            public void onCancelled() {
+                // User cancelled pairing
+            }
+        });
     }
 
     private void showAddComputerDialog() {
@@ -392,7 +410,7 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } catch (Exception e) {
-                    LimeLog.warning("Failed to add computer: " + e.getMessage());
+                    Log.e(TAG, "Failed to add computer: " + e.getMessage());
                 }
 
                 final boolean finalSuccess = success;
@@ -429,10 +447,14 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
         return null;
     }
 
-    private void startPairingService(final ComputerDetails computer) {
-        Toast.makeText(PcView.this, getResources().getString(R.string.pairing), Toast.LENGTH_SHORT).show();
+    private void startPairingService(final ComputerDetails computer, String username, String password) {
+        // Show progress dialog
+        Dialog.displayProgressDialog(this,
+                getString(R.string.pair_pairing_title),
+                getString(R.string.pairing),
+                null);
 
-        // Start PairingService for background pairing with notification
+        // Start PairingService with Sunshine credentials for automatic pairing
         Intent pairingIntent = new Intent(this, PairingService.class);
         pairingIntent.putExtra(PairingService.EXTRA_COMPUTER_UUID, computer.uuid);
         pairingIntent.putExtra(PairingService.EXTRA_COMPUTER_NAME, computer.name);
@@ -441,12 +463,16 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
         pairingIntent.putExtra(PairingService.EXTRA_COMPUTER_HTTPS_PORT, computer.httpsPort);
         pairingIntent.putExtra(PairingService.EXTRA_UNIQUE_ID, managerBinder.getUniqueId());
 
+        // Add Sunshine credentials
+        pairingIntent.putExtra(PairingService.EXTRA_SUNSHINE_USERNAME, username);
+        pairingIntent.putExtra(PairingService.EXTRA_SUNSHINE_PASSWORD, password);
+
         try {
             if (computer.serverCert != null) {
                 pairingIntent.putExtra(PairingService.EXTRA_SERVER_CERT, computer.serverCert.getEncoded());
             }
         } catch (java.security.cert.CertificateEncodingException e) {
-            LimeLog.warning("Failed to encode server certificate for pairing service: " + e.getMessage());
+            Log.e(TAG, "Failed to encode server certificate for pairing service: " + e.getMessage());
             Log.e(TAG, "startPairingService: " + e.getMessage(), e);
         }
 
@@ -460,6 +486,8 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
                     @Override
                     public void onPairingSuccess(String computerUuid, java.security.cert.X509Certificate serverCert) {
                         runOnUiThread(() -> {
+                            Dialog.dismissProgressDialog();
+                            Toast.makeText(PcView.this, R.string.sunshine_pairing_success, Toast.LENGTH_SHORT).show();
                             // Pin this certificate for later HTTPS use
                             if (managerBinder != null) {
                                 ComputerDetails comp = managerBinder.getComputer(computerUuid);
@@ -478,9 +506,12 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
                     @Override
                     public void onPairingFailed(String computerUuid, String message) {
                         runOnUiThread(() -> {
-                            if (message != null) {
-                                Toast.makeText(PcView.this, message, Toast.LENGTH_LONG).show();
-                            }
+                            Dialog.dismissProgressDialog();
+                            String errorMsg = message != null ? message : getString(R.string.pair_fail);
+                            Dialog.displayDialog(PcView.this,
+                                    getString(R.string.pairing_notification_failed_title),
+                                    getString(R.string.sunshine_pairing_failed, errorMsg),
+                                    false);
                             // Start polling again if we're still in the foreground
                             startComputerUpdates();
                         });
@@ -584,7 +615,7 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
 
             case DELETE_ID:
                 if (ActivityManager.isUserAMonkey()) {
-                    LimeLog.info("Ignoring delete PC request from monkey");
+                    Log.i(TAG, "Ignoring delete PC request from monkey");
                     return true;
                 }
                 UiHelper.displayDeletePcConfirmationDialog(this, computer.details, () -> {

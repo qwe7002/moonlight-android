@@ -1,12 +1,8 @@
 package com.limelight.utils;
 
-import android.content.Context;
-import android.content.pm.FeatureInfo;
-import android.content.pm.PackageManager;
 import android.os.Build;
+import android.util.Log;
 
-
-import com.limelight.LimeLog;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -20,102 +16,37 @@ import java.util.regex.Pattern;
  */
 public class VulkanHelper {
 
-
-    /**
-     * Information about the Vulkan GPU device
-     */
-    @SuppressWarnings("NullableProblems")
-    public static class VulkanDeviceInfo {
-        public String deviceName;
-        public int apiVersion;
-        public int driverVersion;
-        public int vendorId;
-        public int deviceId;
-
-        @Override
-        public String toString() {
-            return "VulkanDeviceInfo{" +
-                    "deviceName='" + deviceName + '\'' +
-                    ", apiVersion=" + apiVersion +
-                    ", driverVersion=" + driverVersion +
-                    ", vendorId=" + vendorId +
-                    ", deviceId=" + deviceId +
-                    '}';
-        }
-    }
-
-    /**
-     * Check if Vulkan is supported on this device.
-     */
-    public static boolean isVulkanSupported(Context context) {
-        PackageManager pm = context.getPackageManager();
-        FeatureInfo[] features = pm.getSystemAvailableFeatures();
-        for (FeatureInfo feature : features) {
-            if (feature.name != null && feature.name.equals(PackageManager.FEATURE_VULKAN_HARDWARE_LEVEL)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Get the Vulkan hardware level (0 = baseline, 1 = level 1, etc.)
-     */
-    public static int getVulkanHardwareLevel(Context context) {
-        PackageManager pm = context.getPackageManager();
-        FeatureInfo[] features = pm.getSystemAvailableFeatures();
-        for (FeatureInfo feature : features) {
-            if (feature.name != null && feature.name.equals(PackageManager.FEATURE_VULKAN_HARDWARE_LEVEL)) {
-                return feature.version;
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * Get the Vulkan API version supported by the device.
-     */
-    public static int getVulkanVersion(Context context) {
-        PackageManager pm = context.getPackageManager();
-        FeatureInfo[] features = pm.getSystemAvailableFeatures();
-        for (FeatureInfo feature : features) {
-            if (feature.name != null && feature.name.equals(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION)) {
-                return feature.version;
-            }
-        }
-        return -1;
-    }
+    private static final String TAG = "VulkanHelper";
 
     /**
      * Get the GPU renderer name using Vulkan.
      * This reads from system properties as a fallback and uses dumpsys if available.
      *
-     * @param context Android context
      * @return GPU renderer name string, or empty string if not available
      */
-    public static String getGpuRenderer(Context context) {
+    public static String getGpuRenderer() {
         // First, try to get GPU info from system properties
         String gpuRenderer = getGpuFromSystemProperties();
         if (gpuRenderer != null && !gpuRenderer.isEmpty()) {
-            LimeLog.info("Got GPU from system properties: " + gpuRenderer);
+            Log.i(TAG, "Got GPU from system properties: " + gpuRenderer);
             return gpuRenderer;
         }
 
         // Fallback: Try to get from Build properties
         gpuRenderer = getGpuFromBuildProperties();
         if (gpuRenderer != null && !gpuRenderer.isEmpty()) {
-            LimeLog.info("Got GPU from Build properties: " + gpuRenderer);
+            Log.i(TAG, "Got GPU from Build properties: " + gpuRenderer);
             return gpuRenderer;
         }
 
         // Try to get Vulkan device info via dumpsys (requires shell access on some devices)
         gpuRenderer = getGpuFromDumpsys();
         if (gpuRenderer != null && !gpuRenderer.isEmpty()) {
-            LimeLog.info("Got GPU from dumpsys: " + gpuRenderer);
+            Log.i(TAG, "Got GPU from dumpsys: " + gpuRenderer);
             return gpuRenderer;
         }
 
-        LimeLog.warning("Could not detect GPU renderer via Vulkan methods");
+        Log.e(TAG, "Could not detect GPU renderer via Vulkan methods");
         return "";
     }
 
@@ -143,7 +74,7 @@ public class VulkanHelper {
                 }
             }
         } catch (Exception e) {
-            LimeLog.warning("Failed to get GPU from system properties: " + e.getMessage());
+            Log.e(TAG, "Failed to get GPU from system properties: " + e.getMessage(), e);
         }
         return null;
     }
@@ -320,7 +251,7 @@ public class VulkanHelper {
                 return hardware;
             }
         } catch (Exception e) {
-            LimeLog.warning("Failed to get GPU from Build properties: " + e.getMessage());
+           Log.e(TAG,"Failed to get GPU from Build properties: " + e.getMessage(),e);
         }
         return null;
     }

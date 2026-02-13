@@ -1,7 +1,6 @@
 package com.limelight.binding.video.decoder;
 
 
-import com.limelight.LimeLog;
 import com.limelight.binding.video.MediaCodecHelper;
 
 import java.nio.ByteBuffer;

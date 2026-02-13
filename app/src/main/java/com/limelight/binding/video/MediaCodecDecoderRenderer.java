@@ -7,7 +7,6 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.LinkedBlockingQueue;
 
-import com.limelight.LimeLog;
 import com.limelight.binding.video.decoder.CodecRecoveryManager;
 import com.limelight.binding.video.decoder.CsdBufferProcessor;
 import com.limelight.binding.video.decoder.DecoderCapabilityChecker;

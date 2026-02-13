@@ -1,22 +1,16 @@
 package com.limelight.computers;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
 import android.os.Binder;
-import android.os.Handler;
 import android.os.IBinder;
-import android.os.Looper;
-import android.widget.Toast;
 
-import com.limelight.LimeLog;
 import com.limelight.PcView;
 import com.limelight.R;
 import com.limelight.binding.PlatformBinding;
@@ -40,6 +34,10 @@ public class PairingService extends Service {
     public static final String EXTRA_COMPUTER_HTTPS_PORT = "computer_https_port";
     public static final String EXTRA_SERVER_CERT = "server_cert";
     public static final String EXTRA_UNIQUE_ID = "unique_id";
+
+    // Sunshine auto-pairing extras
+    public static final String EXTRA_SUNSHINE_USERNAME = "sunshine_username";
+    public static final String EXTRA_SUNSHINE_PASSWORD = "sunshine_password";
 
     public static final String ACTION_CANCEL_PAIRING = "com.limelight.CANCEL_PAIRING";
 
@@ -115,7 +113,16 @@ public class PairingService extends Service {
         final byte[] serverCertBytes = intent.getByteArrayExtra(EXTRA_SERVER_CERT);
         final String uniqueId = intent.getStringExtra(EXTRA_UNIQUE_ID);
 
+        // Sunshine auto-pairing credentials
+        final String sunshineUsername = intent.getStringExtra(EXTRA_SUNSHINE_USERNAME);
+        final String sunshinePassword = intent.getStringExtra(EXTRA_SUNSHINE_PASSWORD);
+
         if (computerUuid == null || computerAddress == null || uniqueId == null) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        if (sunshineUsername == null || sunshinePassword == null) {
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -123,51 +130,24 @@ public class PairingService extends Service {
         // Generate PIN
         currentPin = PairingManager.generatePinString();
 
-        // Auto-copy PIN to clipboard
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        ClipData clip = ClipData.newPlainText("PIN", currentPin);
-        clipboard.setPrimaryClip(clip);
+        // Get device name for pairing
+        final String deviceName = android.os.Build.MODEL;
 
         // Show notification
-        showPairingNotification(computerName, currentPin);
+        showPairingNotification(computerName, deviceName);
 
-        // Open browser to the server's web page for pairing
-        openPairingWebPage(computerAddress, httpsPort);
-
-        // Start pairing in background
+        // Start pairing in background using Sunshine API
         cancelled = false;
         pairingThread = new Thread(() ->
-            doPairing(computerUuid, computerName, computerAddress, httpPort, httpsPort, serverCertBytes, uniqueId, currentPin));
+            doSunshinePairing(computerUuid, computerName, computerAddress, httpPort, httpsPort,
+                              serverCertBytes, uniqueId, currentPin, sunshineUsername, sunshinePassword, deviceName));
         pairingThread.start();
 
         return START_STICKY;
     }
 
-    private void openPairingWebPage(String computerAddress, int httpsPort) {
-        try {
-            // Build the URL for the server's web interface
-            String host = computerAddress;
-            // Wrap IPv6 addresses in brackets
-            if (host.contains(":") && !host.startsWith("[")) {
-                host = "[" + host + "]";
-            }
 
-            // Use port 47990 for the web interface
-            String url = "https://" + host + ":47990";
-
-            Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-            browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(browserIntent);
-        } catch (Exception e) {
-            LimeLog.warning("Failed to open browser: " + e.getMessage());
-            // Show toast on main thread
-            new Handler(Looper.getMainLooper()).post(() ->
-                Toast.makeText(this, R.string.pair_browser_open_failed, Toast.LENGTH_SHORT).show()
-            );
-        }
-    }
-
-    private void showPairingNotification(String computerName, String pin) {
+    private void showPairingNotification(String computerName, String deviceName) {
         // Intent to open PcView
         Intent openIntent = new Intent(this, PcView.class);
         openIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -183,7 +163,7 @@ public class PairingService extends Service {
         );
 
         String title = getString(R.string.pairing_notification_title, computerName);
-        String content = getString(R.string.pairing_notification_content, pin);
+        String content = getString(R.string.pairing_notification_auto_content, deviceName);
 
         Notification.Builder builder = new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
@@ -224,8 +204,14 @@ public class PairingService extends Service {
         notificationManager.notify(NOTIFICATION_ID + 1, builder.build());
     }
 
-    private void doPairing(String computerUuid, String computerName, String computerAddress,
-                           int httpPort, int httpsPort, byte[] serverCertBytes, String uniqueId, String pin) {
+
+    /**
+     * Perform pairing using Sunshine's REST API with username/password authentication
+     * Flow: pm.pair() sends pairing request -> server waits for PIN -> /api/pin submits PIN -> pairing completes
+     */
+    private void doSunshinePairing(String computerUuid, String computerName, String computerAddress,
+                                   int httpPort, int httpsPort, byte[] serverCertBytes, String uniqueId,
+                                   String pin, String username, String password, String deviceName) {
         String message = null;
         X509Certificate pairedCert = null;
         boolean success = false;
@@ -247,8 +233,31 @@ public class PairingService extends Service {
 
             if (httpConn.getPairState() == PairState.PAIRED) {
                 success = true;
+                pairedCert = httpConn.getPairingManager().getPairedCert();
             } else {
                 PairingManager pm = httpConn.getPairingManager();
+
+                // Step 1: Start pm.pair() which sends the pairing request and blocks waiting for PIN
+                // We need to submit the PIN via /api/pin while pm.pair() is waiting
+                // Schedule PIN submission to run after a short delay (to ensure pm.pair() has started)
+                final String finalComputerAddress = computerAddress;
+                new Thread(() -> {
+                    try {
+                        // Wait a bit for pm.pair() to start and send the initial pairing request
+                        Thread.sleep(500);
+                        LimeLog.info("Submitting PIN to Sunshine API...");
+                        boolean pinSubmitted = sendPinToSunshine(finalComputerAddress, username, password, pin, deviceName);
+                        if (pinSubmitted) {
+                            LimeLog.info("PIN submitted successfully");
+                        } else {
+                            LimeLog.warning("Failed to submit PIN to Sunshine API");
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }).start();
+
+                // Step 2: This call blocks until server receives PIN and completes pairing
                 PairState pairState = pm.pair(httpConn.getServerInfo(true), pin);
 
                 if (pairState == PairState.PIN_WRONG) {
@@ -267,7 +276,7 @@ public class PairingService extends Service {
         } catch (FileNotFoundException e) {
             message = getString(R.string.error_404);
         } catch (Exception e) {
-            LimeLog.warning("Pairing failed: " + e.getMessage());
+            LimeLog.warning("Sunshine pairing failed: " + e.getMessage());
             message = e.getMessage();
         }
 
@@ -292,6 +301,117 @@ public class PairingService extends Service {
         }
 
         stopSelf();
+    }
+
+    /**
+     * Send PIN to Sunshine server via its REST API
+     * @return true if PIN was accepted
+     */
+    private boolean sendPinToSunshine(String computerAddress, String username, String password,
+                                      String pin, String deviceName) {
+        javax.net.ssl.HttpsURLConnection connection = null;
+        try {
+            // Build URL for Sunshine API
+            String host = computerAddress;
+            if (host.contains(":") && !host.startsWith("[")) {
+                host = "[" + host + "]";
+            }
+            String url = "https://" + host + ":47990/api/pin";
+
+            LimeLog.info("Sending PIN to Sunshine API: " + url);
+
+            // Create JSON payload
+            org.json.JSONObject jsonPayload = new org.json.JSONObject();
+            jsonPayload.put("pin", pin);
+            jsonPayload.put("name", deviceName);
+
+            // Create Basic Auth header
+            String credentials = username + ":" + password;
+            String basicAuth = "Basic " + android.util.Base64.encodeToString(
+                    credentials.getBytes(java.nio.charset.StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
+
+            // Create trust manager that accepts all certificates (for self-signed Sunshine certs)
+            @SuppressLint("CustomX509TrustManager") javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
+                new javax.net.ssl.X509TrustManager() {
+                    public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+                        return new java.security.cert.X509Certificate[0];
+                    }
+                    @SuppressLint("TrustAllX509TrustManager")
+                    public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                    @SuppressLint("TrustAllX509TrustManager")
+                    public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                }
+            };
+
+            // Create SSL context with trust-all manager
+            javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS");
+            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+            javax.net.ssl.SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
+            javax.net.ssl.HostnameVerifier trustAllHostnames = (hostname, session) -> true;
+
+            java.net.URL apiUrl = new java.net.URL(url);
+            connection = (javax.net.ssl.HttpsURLConnection) apiUrl.openConnection();
+
+            // Set SSL configuration on the connection (not globally)
+            connection.setSSLSocketFactory(sslSocketFactory);
+            connection.setHostnameVerifier(trustAllHostnames);
+
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Authorization", basicAuth);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Accept", "*/*");
+            connection.setDoOutput(true);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(30000);
+
+            // Send request
+            byte[] input = jsonPayload.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            try (java.io.OutputStream os = connection.getOutputStream()) {
+                os.write(input, 0, input.length);
+                os.flush();
+            }
+
+            int responseCode = connection.getResponseCode();
+            LimeLog.info("Sunshine API response code: " + responseCode);
+
+            // 200 OK means PIN was accepted
+            if (responseCode == 200) {
+                return true;
+            } else if (responseCode == 401) {
+                LimeLog.warning("Sunshine API authentication failed (401)");
+                return false;
+            } else {
+                // Try to read error message
+                java.io.InputStream errorStream = connection.getErrorStream();
+                if (errorStream != null) {
+                    try (java.io.BufferedReader br = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(errorStream, java.nio.charset.StandardCharsets.UTF_8))) {
+                        StringBuilder response = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            response.append(line);
+                        }
+                        LimeLog.warning("Sunshine API error response: " + response);
+                    }
+                }
+                return false;
+            }
+        } catch (javax.net.ssl.SSLHandshakeException e) {
+            LimeLog.warning("SSL Handshake failed: " + e.getMessage());
+            LimeLog.warning("Stack trace: " + android.util.Log.getStackTraceString(e));
+            return false;
+        } catch (java.net.SocketTimeoutException e) {
+            LimeLog.warning("Connection timeout: " + e.getMessage());
+            return false;
+        } catch (Exception e) {
+            LimeLog.warning("Failed to send PIN to Sunshine: " + e.getMessage());
+            LimeLog.warning("Stack trace: " + android.util.Log.getStackTraceString(e));
+            return false;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
     }
 
     @Override

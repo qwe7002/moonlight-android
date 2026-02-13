@@ -3,7 +3,6 @@ package com.limelight.binding.video.decoder;
 import android.media.MediaCodecInfo;
 import android.util.Range;
 
-import com.limelight.LimeLog;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.preferences.PreferenceConfiguration;
 

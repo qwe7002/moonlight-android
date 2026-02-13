@@ -2,7 +2,6 @@ package com.limelight.grid.assets;
 
 import android.content.Context;
 
-import com.limelight.LimeLog;
 import com.limelight.binding.PlatformBinding;
 import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.utils.ServerHelper;

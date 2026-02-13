@@ -7,7 +7,6 @@ import android.graphics.BitmapFactory;
 import android.graphics.ImageDecoder;
 import android.os.Build;
 
-import com.limelight.LimeLog;
 import com.limelight.utils.CacheHelper;
 
 import java.io.File;

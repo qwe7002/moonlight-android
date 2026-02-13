@@ -3,8 +3,6 @@ package com.limelight;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.graphics.Bitmap;
-import android.os.Build;
-import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -99,7 +97,7 @@ public class HelpActivity extends Activity {
         super.onDestroy();
     }
 
-    @Override
+/*    @Override
     // NOTE: This will NOT be called on Android 13+ with android:enableOnBackInvokedCallback="true"
     public void onBackPressed() {
         // Back goes back through the WebView history
@@ -110,5 +108,5 @@ public class HelpActivity extends Activity {
         else {
             super.onBackPressed();
         }
-    }
+    }*/
 }

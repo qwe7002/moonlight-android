@@ -7,8 +7,6 @@ import java.io.OutputStreamWriter;
 import java.util.Locale;
 import java.util.Random;
 
-import com.limelight.LimeLog;
-
 import android.content.Context;
 
 public class IdentityManager {

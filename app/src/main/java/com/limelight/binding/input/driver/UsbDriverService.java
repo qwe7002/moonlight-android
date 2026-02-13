@@ -17,11 +17,9 @@ import android.os.IBinder;
 import android.view.InputDevice;
 import android.widget.Toast;
 
-import com.limelight.LimeLog;
 import com.limelight.R;
 import com.limelight.preferences.PreferenceConfiguration;
 
-import java.io.File;
 import java.util.ArrayList;
 
 public class UsbDriverService extends Service implements UsbDriverListener {

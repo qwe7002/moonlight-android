@@ -1,6 +1,5 @@
 package com.limelight.utils;
 
-import com.limelight.LimeLog;
 import com.limelight.nvstream.http.ComputerDetails;
 
 import java.io.IOException;

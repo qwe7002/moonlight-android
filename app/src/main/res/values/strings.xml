@@ -59,6 +59,7 @@
     <string name="pairing_notification_channel_description">Shows pairing status and PIN code</string>
     <string name="pairing_notification_title">Pairing with %1$s</string>
     <string name="pairing_notification_content">PIN: %1$s</string>
+    <string name="pairing_notification_auto_content">Pairing as %1$s…</string>
     <string name="pairing_notification_success_title">Pairing Successful</string>
     <string name="pairing_notification_success_content">Successfully paired with %1$s</string>
     <string name="pairing_notification_failed_title">Pairing Failed</string>
@@ -404,4 +405,16 @@
     <string name="back_menu_alt_f4">Send Alt+F4</string>
     <string name="back_menu_task_manager">Open Task Manager</string>
     <string name="back_menu_cancel">Cancel</string>
+
+    <!-- Sunshine pairing -->
+    <string name="sunshine_pairing_title">Pair with %1$s</string>
+    <string name="sunshine_pairing_message">Enter your Sunshine web UI credentials to pair automatically.</string>
+    <string name="sunshine_username_hint">Username</string>
+    <string name="sunshine_password_hint">Password</string>
+    <string name="sunshine_enter_username">Please enter username</string>
+    <string name="sunshine_enter_password">Please enter password</string>
+    <string name="sunshine_pairing_success">Successfully paired with Sunshine server</string>
+    <string name="sunshine_pairing_failed">Failed to pair: %1$s</string>
+    <string name="sunshine_pairing_auth_failed">Authentication failed. Check your username and password.</string>
+    <string name="sunshine_pairing_connecting">Connecting to Sunshine server…</string>
 </resources>

@@ -25,7 +25,6 @@ import javax.crypto.SecretKey;
 
 import org.xmlpull.v1.XmlPullParserException;
 
-import com.limelight.LimeLog;
 import com.limelight.nvstream.av.audio.AudioRenderer;
 import com.limelight.nvstream.av.video.VideoDecoderRenderer;
 import com.limelight.nvstream.http.ComputerDetails;

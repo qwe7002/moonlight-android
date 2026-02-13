@@ -6,8 +6,6 @@ import org.bouncycastle.crypto.params.KeyParameter;
 
 import org.xmlpull.v1.XmlPullParserException;
 
-import com.limelight.LimeLog;
-
 import java.security.cert.Certificate;
 import java.io.*;
 import java.security.*;

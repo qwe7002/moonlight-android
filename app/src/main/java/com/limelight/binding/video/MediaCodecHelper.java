@@ -19,8 +19,6 @@ import android.media.MediaFormat;
 import android.os.Build;
 import android.util.Log;
 
-import com.limelight.LimeLog;
-
 @SuppressWarnings("RedundantSuppression")
 public class MediaCodecHelper {
 

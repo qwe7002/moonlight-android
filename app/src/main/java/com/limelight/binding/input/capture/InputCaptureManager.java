@@ -2,7 +2,6 @@ package com.limelight.binding.input.capture;
 
 import android.app.Activity;
 
-import com.limelight.LimeLog;
 import com.limelight.R;
 
 public class InputCaptureManager {

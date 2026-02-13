@@ -1,7 +1,5 @@
 package com.limelight.nvstream.http;
 
-import com.limelight.LimeLog;
-
 public class NvApp {
     private String appName = "";
     private int appId;

@@ -39,7 +39,6 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.util.Base64;
 
-import com.limelight.LimeLog;
 import com.limelight.nvstream.http.LimelightCryptoProvider;
 
 public class AndroidCryptoProvider implements LimelightCryptoProvider {

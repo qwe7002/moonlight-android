@@ -3,8 +3,6 @@ package com.limelight.binding.video.decoder;
 import android.media.MediaCodec.CodecException;
 import android.util.Log;
 
-import com.limelight.LimeLog;
-
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**

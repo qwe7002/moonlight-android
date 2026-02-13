@@ -1,7 +1,5 @@
 package com.limelight.nvstream.mdns;
 
-import com.limelight.LimeLog;
-
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.util.ArrayList;

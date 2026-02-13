@@ -4,9 +4,7 @@ public class Vector2d {
     private float x;
     private float y;
     private double magnitude;
-    
-    public static final Vector2d ZERO = new Vector2d();
-    
+
     public Vector2d() {
         initialize(0, 0);
     }

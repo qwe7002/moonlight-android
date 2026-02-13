@@ -9,7 +9,6 @@ import android.media.AudioTrack;
 import android.media.audiofx.AudioEffect;
 import android.util.Log;
 
-import com.limelight.LimeLog;
 import com.limelight.nvstream.av.audio.AudioRenderer;
 import com.limelight.nvstream.jni.MoonBridge;
 
