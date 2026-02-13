@@ -123,6 +123,24 @@ public class NvConnection {
         }
     }
 
+    /**
+     * Check if the device is currently connected via VPN.
+     *
+     * @return true if connected via VPN, false otherwise
+     */
+    private boolean isVpnConnected() {
+        ConnectivityManager connMgr = (ConnectivityManager) appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network activeNetwork = connMgr.getActiveNetwork();
+        if (activeNetwork != null) {
+            NetworkCapabilities netCaps = connMgr.getNetworkCapabilities(activeNetwork);
+            if (netCaps != null) {
+                return netCaps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
+                        !netCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN);
+            }
+        }
+        return false;
+    }
+
     private int detectServerConnectionType() {
         ConnectivityManager connMgr = (ConnectivityManager) appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
         Network activeNetwork = connMgr.getActiveNetwork();
@@ -476,6 +494,13 @@ public class NvConnection {
             // we must not invoke that functionality in parallel.
             synchronized (MoonBridge.class) {
                 MoonBridge.setupBridge(videoDecoderRenderer, audioRenderer, connectionListener);
+
+                // Determine if encryption should be disabled:
+                // 1. Force disable: always disable encryption regardless of network type
+                // 2. VPN disable: only disable when connected via VPN
+                boolean disableEncryption = context.streamConfig.getForceDisableEncryption() ||
+                        (context.streamConfig.getDisableEncryptionOnVpn() && isVpnConnected());
+
                 int ret = MoonBridge.startConnection(context.serverAddress.address,
                         context.serverAppVersion, context.serverGfeVersion, context.rtspSessionUrl,
                         context.serverCodecModeSupport,
@@ -488,7 +513,8 @@ public class NvConnection {
                         context.riKey.getEncoded(), ib.array(),
                         context.videoCapabilities,
                         context.streamConfig.getColorSpace(),
-                        context.streamConfig.getColorRange());
+                        context.streamConfig.getColorRange(),
+                        disableEncryption);
                 if (ret != 0) {
                     // LiStartConnection() failed, so the caller is not expected
                     // to stop the connection themselves. We need to release their

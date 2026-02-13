@@ -644,8 +644,9 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_startConnection(
     video_capabilities: JInt,
     color_space: JInt,
     color_range: JInt,
+    disable_encryption: JBoolean,
 ) -> JInt {
-    info!("startConnection called: {}x{} @ {}fps, bitrate={}", width, height, fps, bitrate);
+    info!("startConnection called: {}x{} @ {}fps, bitrate={}, disable_encryption={}", width, height, fps, bitrate, disable_encryption != 0);
 
     // Get string parameters
     let address_str = unsafe { jni_get_string_utf_chars(env, address) };
@@ -684,8 +685,11 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_startConnection(
         jni_get_byte_array_region(env, ri_aes_iv, 0, 16, aes_iv.as_mut_ptr() as *mut i8);
     }
 
-    // Determine encryption flags based on hardware AES support
-    let encryption_flags = if has_fast_aes() {
+    // Determine encryption flags based on hardware AES support and user preference
+    let encryption_flags = if disable_encryption != 0 {
+        info!("Encryption disabled by user preference");
+        ENCFLG_NONE
+    } else if has_fast_aes() {
         info!("Using hardware AES encryption");
         ENCFLG_ALL
     } else {

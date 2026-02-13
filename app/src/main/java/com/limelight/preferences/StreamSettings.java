@@ -617,6 +617,35 @@ public class StreamSettings extends AppCompatActivity {
                 });
             }
 
+            // Add security warning for force disable encryption option
+            CheckBoxPreference forceDisableEncryptionPref = findPreference("checkbox_force_disable_encryption");
+            if (forceDisableEncryptionPref != null) {
+                forceDisableEncryptionPref.setOnPreferenceChangeListener((preference, newValue) -> {
+                    if ((Boolean) newValue) {
+                        // User is enabling force disable encryption, show security warning
+                        Activity activity = getActivity();
+                        if (activity != null) {
+                            new android.app.AlertDialog.Builder(activity)
+                                    .setTitle(R.string.encryption_warning_title)
+                                    .setMessage(R.string.encryption_warning_message)
+                                    .setPositiveButton(R.string.encryption_warning_confirm, (dialog, which) -> {
+                                        // User confirmed, enable the option
+                                        forceDisableEncryptionPref.setChecked(true);
+                                    })
+                                    .setNegativeButton(R.string.encryption_warning_cancel, (dialog, which) -> {
+                                        // User cancelled, keep the option disabled
+                                        dialog.dismiss();
+                                    })
+                                    .setCancelable(false)
+                                    .show();
+                        }
+                        // Prevent the default change, we'll set it manually if confirmed
+                        return false;
+                    }
+                    return true;
+                });
+            }
+
         }
     }
 }

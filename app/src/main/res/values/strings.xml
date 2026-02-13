@@ -313,6 +313,18 @@
     <string name="title_checkbox_enable_mdns">Enable mDNS discovery</string>
     <string name="summary_checkbox_enable_mdns">Automatically discover host PCs on your local network</string>
 
+    <!-- Encryption Settings -->
+    <string name="title_checkbox_force_disable_encryption">Force disable encryption</string>
+    <string name="summary_checkbox_force_disable_encryption">Always disable stream encryption (DANGEROUS - only use on trusted networks)</string>
+    <string name="title_checkbox_disable_encryption_vpn">Disable encryption on VPN</string>
+    <string name="summary_checkbox_disable_encryption_vpn">Disable stream encryption when connected via VPN (VPN provides its own encryption)</string>
+
+    <!-- Encryption Warning Dialog -->
+    <string name="encryption_warning_title">⚠️ Security Warning</string>
+    <string name="encryption_warning_message">Disabling encryption is DANGEROUS!\n\nYour stream data (including video, audio, and input) will be transmitted without encryption, making it vulnerable to:\n\n• Eavesdropping\n• Man-in-the-middle attacks\n• Data interception\n\nOnly enable this if you fully understand the risks and are using a trusted, secure network.\n\nAre you sure you want to disable encryption?</string>
+    <string name="encryption_warning_confirm">I understand the risks</string>
+    <string name="encryption_warning_cancel">Cancel</string>
+
     <!-- Notification -->
     <string name="stats_notification_channel_name">Streaming Statistics</string>
     <string name="stats_notification_channel_description">Shows real-time streaming performance statistics</string>

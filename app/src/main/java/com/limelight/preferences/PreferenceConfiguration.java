@@ -65,6 +65,8 @@ public class PreferenceConfiguration {
     private static final String GAMEPAD_MOTION_SENSORS_PREF_STRING = "checkbox_gamepad_motion_sensors";
     private static final String GAMEPAD_MOTION_FALLBACK_PREF_STRING = "checkbox_gamepad_motion_fallback";
     private static final String ENABLE_MDNS_PREF_STRING = "checkbox_enable_mdns";
+    private static final String FORCE_DISABLE_ENCRYPTION_PREF_STRING = "checkbox_force_disable_encryption";
+    private static final String DISABLE_ENCRYPTION_ON_VPN_PREF_STRING = "checkbox_disable_encryption_vpn";
 
     static final String DEFAULT_RESOLUTION = "1920x1080";
     static final String DEFAULT_FPS = "60";
@@ -103,6 +105,8 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_GAMEPAD_MOTION_SENSORS = true;
     private static final boolean DEFAULT_GAMEPAD_MOTION_FALLBACK = false;
     private static final boolean DEFAULT_ENABLE_MDNS = false;
+    private static final boolean DEFAULT_FORCE_DISABLE_ENCRYPTION = false;
+    private static final boolean DEFAULT_DISABLE_ENCRYPTION_ON_VPN = false;
 
     public static final int FRAME_PACING_MIN_LATENCY = 0;
     public static final int FRAME_PACING_BALANCED = 1;
@@ -145,6 +149,8 @@ public class PreferenceConfiguration {
     public boolean gamepadTouchpadAsMouse;
     public boolean gamepadMotionSensorsFallbackToDevice;
     public boolean enableMdns;
+    public boolean forceDisableEncryption;
+    public boolean disableEncryptionOnVpn;
 
     public static boolean isNativeResolution(int width, int height) {
         // It's not a native resolution if it matches an existing resolution option
@@ -619,6 +625,8 @@ public class PreferenceConfiguration {
         config.gamepadMotionSensors = prefs.getBoolean(GAMEPAD_MOTION_SENSORS_PREF_STRING, DEFAULT_GAMEPAD_MOTION_SENSORS);
         config.gamepadMotionSensorsFallbackToDevice = prefs.getBoolean(GAMEPAD_MOTION_FALLBACK_PREF_STRING, DEFAULT_GAMEPAD_MOTION_FALLBACK);
         config.enableMdns = prefs.getBoolean(ENABLE_MDNS_PREF_STRING, DEFAULT_ENABLE_MDNS);
+        config.forceDisableEncryption = prefs.getBoolean(FORCE_DISABLE_ENCRYPTION_PREF_STRING, DEFAULT_FORCE_DISABLE_ENCRYPTION);
+        config.disableEncryptionOnVpn = prefs.getBoolean(DISABLE_ENCRYPTION_ON_VPN_PREF_STRING, DEFAULT_DISABLE_ENCRYPTION_ON_VPN);
 
         return config;
     }
