@@ -14,6 +14,7 @@ import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
 import android.view.InputDevice;
 import android.widget.Toast;
@@ -41,6 +42,7 @@ public class UsbDriverService extends Service implements UsbDriverListener {
     private UsbDriverListener listener;
     private UsbDriverStateListener stateListener;
     private int nextDeviceId;
+    private PowerManager.WakeLock usbWakeLock;
 
     @Override
     public void reportControllerState(int controllerId, int buttonFlags, float leftStickX, float leftStickY,
@@ -250,6 +252,14 @@ public class UsbDriverService extends Service implements UsbDriverListener {
 
         started = true;
 
+        // Acquire a wake lock to prevent USB controller disconnection
+        PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        usbWakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "Moonlight:UsbController");
+        usbWakeLock.acquire(24 * 60 * 60 * 1000L); // 24 hours, will be released in stop()
+        Log.i(TAG, "Acquired USB wake lock");
+
         // Register for USB attach broadcasts and permission completions
         IntentFilter filter = new IntentFilter();
         filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
@@ -282,6 +292,12 @@ public class UsbDriverService extends Service implements UsbDriverListener {
         }
 
         started = false;
+
+        // Release USB wake lock
+        if (usbWakeLock != null && usbWakeLock.isHeld()) {
+            usbWakeLock.release();
+            Log.i(TAG, "Released USB wake lock");
+        }
 
         // Stop the attachment receiver
         unregisterReceiver(receiver);

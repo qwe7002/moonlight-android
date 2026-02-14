@@ -19,6 +19,7 @@ import android.os.CombinedVibration;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.VibrationAttributes;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
@@ -63,8 +64,8 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
 
     private static final int BATTERY_RECHECK_INTERVAL_MS = 120 * 1000;
 
-    // Gamepad keep-alive interval to prevent controller sleep (30 seconds)
-    private static final int GAMEPAD_KEEPALIVE_INTERVAL_MS = 30 * 1000;
+    // Gamepad keep-alive interval to prevent controller sleep (10 seconds - more aggressive)
+    private static final int GAMEPAD_KEEPALIVE_INTERVAL_MS = 10 * 1000;
 
     private static final Map<Integer, Integer> ANDROID_TO_LI_BUTTON_MAP = Map.ofEntries(
             Map.entry(KeyEvent.KEYCODE_BUTTON_A, ControllerPacket.A_FLAG),
@@ -119,6 +120,9 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
     private final Handler backgroundThreadHandler;
     private boolean hasGameController;
     private boolean stopped = false;
+
+    // Wake lock to prevent CPU sleep which can cause controller disconnection
+    private PowerManager.WakeLock controllerWakeLock;
 
     // Gamepad keep-alive mechanism to prevent controller sleep
     private final Runnable gamepadKeepaliveRunnable = new Runnable() {
@@ -214,6 +218,17 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         // Register ourselves for input device notifications
         inputManager.registerInputDeviceListener(this, null);
 
+        // Acquire a partial wake lock to prevent CPU sleep during streaming
+        // This helps keep USB/Bluetooth controllers from disconnecting on devices
+        // with aggressive power management (like K90 Pro Max)
+        PowerManager powerManager = (PowerManager) activityContext.getSystemService(Context.POWER_SERVICE);
+        controllerWakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "Moonlight:ControllerKeepalive");
+        // Use a very long timeout (24 hours) - will be released in stop() anyway
+        controllerWakeLock.acquire(24 * 60 * 60 * 1000L);
+        Log.i(TAG, "Acquired controller wake lock to prevent disconnection");
+
         // Start gamepad keep-alive mechanism to prevent controller sleep
         startGamepadKeepalive();
     }
@@ -295,6 +310,12 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         }
 
         deviceVibrator.cancel();
+
+        // Release controller wake lock
+        if (controllerWakeLock != null && controllerWakeLock.isHeld()) {
+            controllerWakeLock.release();
+            Log.i(TAG, "Released controller wake lock");
+        }
     }
 
     public void destroy() {
@@ -325,71 +346,125 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
 
     /**
      * Perform keep-alive actions on all connected gamepads.
-     * This polls the device state and optionally sends a minimal vibration
-     * to prevent the controller from entering sleep mode.
+     * This uses multiple strategies to prevent controllers from entering sleep mode:
+     * 1. Query input device state and read all axis values
+     * 2. Read LED/Light state if available
+     * 3. Send minimal vibration pulse
+     * 4. Access sensor data if available
      */
     private void performGamepadKeepalive() {
-        int[] deviceIds = InputDevice.getDeviceIds();
-        int gamepadCount = 0;
+        // Also iterate through our tracked input device contexts
+        for (int i = 0; i < inputDeviceContexts.size(); i++) {
+            InputDeviceContext context = inputDeviceContexts.valueAt(i);
+            if (context == null) {
+                continue;
+            }
 
+            int deviceId = inputDeviceContexts.keyAt(i);
+            InputDevice device = InputDevice.getDevice(deviceId);
+            if (device == null) {
+                continue;
+            }
+
+            try {
+                // Strategy 1: Read device descriptor and properties
+                // This forces the system to communicate with the device
+                device.getDescriptor();
+                device.getProductId();
+                device.getVendorId();
+                device.getControllerNumber();
+
+                // Strategy 2: Read all motion ranges (axis configurations)
+                // This queries the device's capabilities
+                for (InputDevice.MotionRange range : device.getMotionRanges()) {
+                    range.getAxis();
+                    range.getRange();
+                }
+
+                // Strategy 3: Query battery state - this often requires device communication
+                BatteryState batteryState = device.getBatteryState();
+                if (batteryState.isPresent()) {
+                    batteryState.getCapacity();
+                    batteryState.getStatus();
+                }
+
+                // Strategy 4: Access lights/LEDs if available
+                try {
+                    LightsManager lightsManager = device.getLightsManager();
+                    for (Light light : lightsManager.getLights()) {
+                        // Just reading the light state triggers communication
+                        light.getType();
+                    }
+                } catch (Exception ignored) {
+                    // Lights not available
+                }
+
+                // Strategy 5: Send a very short vibration pulse
+                // Use a slightly longer duration to ensure the command reaches the controller
+                try {
+                    VibratorManager vibratorManager = device.getVibratorManager();
+                    int[] vibratorIds = vibratorManager.getVibratorIds();
+                    if (vibratorIds.length > 0) {
+                        // Create a 5ms vibration at minimum amplitude
+                        VibrationEffect effect = VibrationEffect.createOneShot(5, 1);
+                        CombinedVibration combinedVibration = CombinedVibration.createParallel(effect);
+
+                        VibrationAttributes attrs = new VibrationAttributes.Builder()
+                                .setUsage(VibrationAttributes.USAGE_MEDIA)
+                                .build();
+
+                        vibratorManager.vibrate(combinedVibration, attrs);
+                    }
+                } catch (Exception ignored) {
+                    // Vibration not supported
+                }
+
+                // Strategy 6: If sensor support is enabled, query sensors
+                if (prefConfig.gamepadMotionSensors) {
+                    try {
+                        SensorManager sensorManager = device.getSensorManager();
+                        sensorManager.getSensorList(Sensor.TYPE_ALL);
+                    } catch (Exception ignored) {
+                        // Sensors not available
+                    }
+                }
+
+                Log.v(TAG, "Keep-alive ping sent to controller: " + device.getName() + " (ID: " + deviceId + ")");
+
+            } catch (Exception e) {
+                Log.w(TAG, "Error performing keep-alive for device " + deviceId + ": " + e.getMessage());
+            }
+        }
+
+        // Also poll by device IDs to catch any controllers we might have missed
+        int[] deviceIds = InputDevice.getDeviceIds();
         for (int deviceId : deviceIds) {
             InputDevice device = InputDevice.getDevice(deviceId);
             if (device == null) {
                 continue;
             }
 
-            // Check if this is a gamepad
+            // Only process game controllers we haven't already processed
+            if (inputDeviceContexts.get(deviceId) != null) {
+                continue;
+            }
+
             if (!isGameControllerDevice(device)) {
                 continue;
             }
 
-            gamepadCount++;
-
-            // Method 1: Poll the device state by reading its properties
-            // This access alone can help keep some controllers awake
             try {
-                // Reading these properties triggers communication with the device
+                // Basic polling for controllers without context
+                device.getDescriptor();
                 device.getName();
-                device.getMotionRanges();
 
-                // Check battery state if available - this also polls the device
                 BatteryState batteryState = device.getBatteryState();
                 if (batteryState.isPresent()) {
-                    // Just accessing the battery state helps keep the device awake
                     batteryState.getCapacity();
                 }
-            } catch (Exception e) {
-                Log.w(TAG, "Error polling gamepad " + deviceId + " for keep-alive: " + e.getMessage());
+            } catch (Exception ignored) {
+                // Best effort
             }
-
-            // Method 2: Send a zero-amplitude vibration pulse (if supported)
-            // This is a no-op vibration that keeps the controller awake without being noticeable
-            try {
-                VibratorManager vibratorManager = device.getVibratorManager();
-                int[] vibratorIds = vibratorManager.getVibratorIds();
-                if (vibratorIds.length > 0) {
-                    // Create a minimal vibration effect (1ms at 0 amplitude)
-                    // This triggers communication without any actual vibration
-                    VibrationEffect effect = VibrationEffect.createOneShot(1, 1);
-                    CombinedVibration combinedVibration = CombinedVibration.createParallel(effect);
-
-                    VibrationAttributes attrs = new VibrationAttributes.Builder()
-                            .setUsage(VibrationAttributes.USAGE_MEDIA)
-                            .build();
-
-                    vibratorManager.vibrate(combinedVibration, attrs);
-
-                    // Immediately cancel to minimize any perceptible vibration
-                    vibratorManager.cancel();
-                }
-            } catch (Exception e) {
-                // Vibration not supported or failed, that's fine
-                Log.v(TAG, "Keep-alive vibration not available for device " + deviceId);
-            }
-        }
-
-        if (gamepadCount > 0) {
-            Log.v(TAG, "Gamepad keep-alive performed for " + gamepadCount + " controller(s)");
         }
     }
 
