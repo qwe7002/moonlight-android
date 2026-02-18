@@ -453,22 +453,26 @@ impl WireGuardTunnel {
                             // TCP packet - forward to HTTP shared proxy's virtual stack
                             crate::wg_http::wg_http_inject_packet(data);
                         } else if protocol == 17 {
-                            // UDP packet - forward to the right proxy
+                            // UDP packet - try zero-copy channel first, then proxy fallback
                             if let Some((src_port, dst_port, payload)) = parse_udp_from_ip_packet(data) {
-                                // Find the proxy for this source port (the remote server port)
-                                let proxies = udp_proxies.lock();
-                                if let Some(proxy) = proxies.get(&src_port) {
-                                    // Send decapsulated data back to the client that connected to this proxy
-                                    let client = proxy.client_addr.lock();
-                                    if let Some(client_addr) = *client {
-                                        if let Err(e) = proxy.proxy_socket.send_to(payload, client_addr) {
-                                            debug!("Failed to forward decapsulated UDP packet to {}: {}", client_addr, e);
+                                // Try zero-copy delivery via platform_sockets channel
+                                if crate::platform_sockets::try_push_udp_data(src_port, payload) {
+                                    // Data delivered via zero-copy channel, skip proxy
+                                } else {
+                                    // No zero-copy channel, use proxy fallback
+                                    let proxies = udp_proxies.lock();
+                                    if let Some(proxy) = proxies.get(&src_port) {
+                                        let client = proxy.client_addr.lock();
+                                        if let Some(client_addr) = *client {
+                                            if let Err(e) = proxy.proxy_socket.send_to(payload, client_addr) {
+                                                debug!("Failed to forward decapsulated UDP packet to {}: {}", client_addr, e);
+                                            }
+                                        } else {
+                                            debug!("No client connected to proxy for port {} yet", src_port);
                                         }
                                     } else {
-                                        debug!("No client connected to proxy for port {} yet", src_port);
+                                        debug!("No proxy found for source port {}", src_port);
                                     }
-                                } else {
-                                    debug!("No proxy found for source port {}", src_port);
                                 }
                             }
                         }
@@ -626,7 +630,7 @@ impl Drop for WireGuardTunnel {
 // ============================================================================
 
 /// Build an IPv4/UDP packet from a payload
-fn build_udp_ip_packet(src: SocketAddr, dst: SocketAddr, payload: &[u8]) -> Vec<u8> {
+pub fn build_udp_ip_packet(src: SocketAddr, dst: SocketAddr, payload: &[u8]) -> Vec<u8> {
     let src_ip = match src.ip() {
         IpAddr::V4(ip) => ip,
         _ => Ipv4Addr::new(0, 0, 0, 0),
@@ -1152,6 +1156,9 @@ pub fn wg_start_tunnel(config: WireGuardConfig) -> io::Result<()> {
 
 /// Stop the global WireGuard tunnel
 pub fn wg_stop_tunnel() {
+    // Disable zero-copy routing before stopping the tunnel
+    crate::platform_sockets::disable_wg_routing();
+
     let mut global = GLOBAL_TUNNEL.lock();
     if let Some(ref tunnel) = *global {
         tunnel.stop();
@@ -1177,10 +1184,22 @@ pub fn wg_create_udp_proxy(target_addr: SocketAddr) -> io::Result<SocketAddr> {
 
 /// Create streaming UDP proxies for all moonlight ports.
 /// This sets up proxies on the same ports locally (47998, 47999, 48000) forwarding to target.
+/// Also enables zero-copy routing in platform_sockets for direct WG encapsulation.
 pub fn wg_create_streaming_proxies(target_ip: Ipv4Addr, base_port: u16) -> io::Result<()> {
     let global = GLOBAL_TUNNEL.lock();
     match global.as_ref() {
-        Some(tunnel) => tunnel.create_streaming_proxies(target_ip, base_port),
+        Some(tunnel) => {
+            tunnel.create_streaming_proxies(target_ip, base_port)?;
+
+            // Enable zero-copy routing: extract tunnel IP from config
+            let tunnel_ip = match tunnel.config.tunnel_address {
+                IpAddr::V4(ip) => ip,
+                _ => Ipv4Addr::new(10, 0, 0, 2), // fallback
+            };
+            crate::platform_sockets::enable_wg_routing(tunnel_ip, target_ip);
+
+            Ok(())
+        }
         None => Err(io::Error::new(io::ErrorKind::NotConnected, "WireGuard tunnel not active")),
     }
 }

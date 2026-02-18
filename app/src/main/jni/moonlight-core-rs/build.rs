@@ -210,8 +210,34 @@ fn main() {
     apply_common_settings(&mut rs_build);
     rs_build.compile("reedsolomon");
 
-    // Build moonlight-common-c library (without PlatformCrypto.c - using Rust ring instead)
+    // Build PlatformSockets.c separately with renamed key functions.
+    // These renamed symbols (orig_*) are called by Rust zero-copy wrappers
+    // in platform_sockets.rs when WG is not active or as fallback.
     let src_dir = moonlight_common_c_dir.join("src");
+    let mut plat_build = cc::Build::new();
+    plat_build
+        .file(src_dir.join("PlatformSockets.c"))
+        .include(&src_dir)
+        .include(enet_dir.join("include"))
+        .include(&rs_dir)
+        .define("HAS_SOCKLEN_T", "1")
+        .define("LC_ANDROID", None)
+        .define("HAVE_CLOCK_GETTIME", "1")
+        // Rename key functions so Rust can provide WG-aware wrappers
+        // while still calling the originals as fallback
+        .define("recvUdpSocket", "orig_recvUdpSocket")
+        .define("bindUdpSocket", "orig_bindUdpSocket")
+        .define("closeSocket", "orig_closeSocket")
+        .warnings(false);
+    apply_common_settings(&mut plat_build);
+    plat_build.compile("platform-sockets-orig");
+
+    // Build moonlight-common-c library
+    // - PlatformCrypto.c excluded: crypto handled by Rust ring crate
+    // - PlatformSockets.c excluded: compiled separately above with renamed symbols;
+    //   Rust provides recvUdpSocket/bindUdpSocket/closeSocket (WG zero-copy wrappers)
+    // - wg_intercept.h force-included: redirects sendto → wg_sendto for zero-copy UDP send
+    let wg_intercept_header = manifest_dir.join("wg_intercept.h");
     let mut mlc_build = cc::Build::new();
     mlc_build
         .file(src_dir.join("AudioStream.c"))
@@ -224,8 +250,8 @@ fn main() {
         .file(src_dir.join("LinkedBlockingQueue.c"))
         .file(src_dir.join("Misc.c"))
         .file(src_dir.join("Platform.c"))
-        // PlatformCrypto.c is excluded - crypto is handled by Rust ring crate
-        .file(src_dir.join("PlatformSockets.c"))
+        // PlatformCrypto.c excluded - crypto handled by Rust ring crate
+        // PlatformSockets.c excluded - compiled separately with renamed symbols
         .file(src_dir.join("RtpAudioQueue.c"))
         .file(src_dir.join("RtpVideoQueue.c"))
         .file(src_dir.join("RtspConnection.c"))
@@ -240,6 +266,9 @@ fn main() {
         .define("HAS_SOCKLEN_T", "1")
         .define("LC_ANDROID", None)
         .define("HAVE_CLOCK_GETTIME", "1")
+        // Force-include WG interception header to redirect sendto → wg_sendto
+        .flag("-include")
+        .flag(wg_intercept_header.to_str().unwrap())
         .warnings(false);
     apply_common_settings(&mut mlc_build);
     mlc_build.compile("moonlight-common-c");
