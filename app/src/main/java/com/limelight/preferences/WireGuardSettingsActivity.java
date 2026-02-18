@@ -20,7 +20,7 @@ import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.google.android.material.materialswitch.MaterialSwitch;
+import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 import com.limelight.R;
@@ -48,7 +48,7 @@ public class WireGuardSettingsActivity extends AppCompatActivity {
     private static final String PREF_KEEPALIVE = "wg_keepalive";
 
     // UI elements
-    private MaterialSwitch switchEnabled;
+    private SwitchMaterial switchEnabled;
     private View statusIndicator;
     private TextView textStatus;
     private Button btnTestConnection;

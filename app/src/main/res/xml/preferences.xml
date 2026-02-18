@@ -251,47 +251,6 @@
             android:key="wireguard_advanced_settings"
             android:title="@string/title_wg_advanced_settings"
             android:summary="@string/summary_wg_advanced_settings" />
-        <CheckBoxPreference
-            android:key="checkbox_wg_enabled"
-            android:title="@string/title_wg_enabled"
-            android:summary="@string/summary_wg_enabled"
-            android:defaultValue="false"/>
-        <EditTextPreference
-            android:key="edit_wg_private_key"
-            android:title="@string/title_wg_private_key"
-            android:summary="@string/summary_wg_private_key"
-            android:inputType="textVisiblePassword"
-            android:dependency="checkbox_wg_enabled"/>
-        <EditTextPreference
-            android:key="edit_wg_peer_public_key"
-            android:title="@string/title_wg_peer_public_key"
-            android:summary="@string/summary_wg_peer_public_key"
-            android:inputType="textVisiblePassword"
-            android:dependency="checkbox_wg_enabled"/>
-        <EditTextPreference
-            android:key="edit_wg_preshared_key"
-            android:title="@string/title_wg_preshared_key"
-            android:summary="@string/summary_wg_preshared_key"
-            android:inputType="textVisiblePassword"
-            android:dependency="checkbox_wg_enabled"/>
-        <EditTextPreference
-            android:key="edit_wg_endpoint"
-            android:title="@string/title_wg_endpoint"
-            android:summary="@string/summary_wg_endpoint"
-            android:inputType="text"
-            android:dependency="checkbox_wg_enabled"/>
-        <EditTextPreference
-            android:key="edit_wg_tunnel_address"
-            android:title="@string/title_wg_tunnel_address"
-            android:summary="@string/summary_wg_tunnel_address"
-            android:inputType="text"
-            android:dependency="checkbox_wg_enabled"/>
-        <EditTextPreference
-            android:key="edit_wg_server_address"
-            android:title="@string/title_wg_server_address"
-            android:summary="@string/summary_wg_server_address"
-            android:inputType="text"
-            android:dependency="checkbox_wg_enabled"/>
     </PreferenceCategory>
     <!--PreferenceCategory android:title="@string/category_help"
         android:key="category_help">

@@ -31,7 +31,7 @@
             android:layout_marginBottom="24dp" />
 
         <!-- Enable WireGuard Switch -->
-        <com.google.android.material.materialswitch.MaterialSwitch
+        <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/switch_wireguard_enabled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -72,7 +72,7 @@
 
                 <Button
                     android:id="@+id/btn_test_connection"
-                    style="@style/Widget.Material3.Button.TextButton"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/wireguard_test_connection" />
@@ -95,7 +95,7 @@
         <!-- Private Key -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/layout_private_key"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="12dp"
@@ -115,7 +115,7 @@
         <!-- Generate Key Button -->
         <Button
             android:id="@+id/btn_generate_keys"
-            style="@style/Widget.Material3.Button.TonalButton"
+            style="@style/Widget.MaterialComponents.Button"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/wireguard_generate_keys"
@@ -124,7 +124,7 @@
         <!-- Public Key (read-only, derived from private key) -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/layout_public_key"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="12dp"
@@ -146,7 +146,7 @@
         <!-- Tunnel Address -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/layout_tunnel_address"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
@@ -176,7 +176,7 @@
         <!-- Peer Public Key -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/layout_peer_public_key"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="12dp"
@@ -195,7 +195,7 @@
         <!-- Peer Endpoint -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/layout_peer_endpoint"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="12dp"
@@ -214,7 +214,7 @@
         <!-- Preshared Key (optional) -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/layout_preshared_key"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
@@ -246,7 +246,7 @@
         <!-- MTU -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/layout_mtu"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="12dp"
@@ -265,7 +265,7 @@
         <!-- Keepalive -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/layout_keepalive"
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="24dp"
@@ -292,7 +292,7 @@
 
             <Button
                 android:id="@+id/btn_import_config"
-                style="@style/Widget.Material3.Button.OutlinedButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -301,7 +301,7 @@
 
             <Button
                 android:id="@+id/btn_export_config"
-                style="@style/Widget.Material3.Button.OutlinedButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -313,7 +313,7 @@
         <!-- Save Button -->
         <Button
             android:id="@+id/btn_save"
-            style="@style/Widget.Material3.Button"
+            style="@style/Widget.MaterialComponents.Button"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/wireguard_save" />
