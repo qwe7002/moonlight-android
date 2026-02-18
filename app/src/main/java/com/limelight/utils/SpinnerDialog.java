@@ -42,8 +42,12 @@ public class SpinnerDialog implements Runnable,OnCancelListener {
                 SpinnerDialog dialog = i.next();
                 if (dialog.activity == activity) {
                     i.remove();
-                    if (dialog.progress.isShowing()) {
-                        dialog.progress.dismiss();
+                    try {
+                        if (dialog.progress != null && dialog.progress.isShowing()) {
+                            dialog.progress.dismiss();
+                        }
+                    } catch (Exception ignored) {
+                        // Dialog may have been destroyed with the activity
                     }
                 }
             }
@@ -101,8 +105,13 @@ public class SpinnerDialog implements Runnable,OnCancelListener {
         else
         {
             synchronized (rundownDialogs) {
-                if (rundownDialogs.remove(this) && progress.isShowing()) {
-                    progress.dismiss();
+                rundownDialogs.remove(this);
+                try {
+                    if (progress != null && progress.isShowing()) {
+                        progress.dismiss();
+                    }
+                } catch (Exception ignored) {
+                    // Dialog may have been destroyed with the activity
                 }
             }
         }

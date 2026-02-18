@@ -664,3 +664,83 @@ pub fn release_primitive_array_critical(env: JNIEnv, array: JObject, carray: *mu
     }
 }
 
+// JNI function indices for string and byte array operations
+const JNI_GET_STRING_UTF_CHARS: usize = 169;
+const JNI_RELEASE_STRING_UTF_CHARS: usize = 170;
+const JNI_GET_BYTE_ARRAY_ELEMENTS: usize = 184;
+const JNI_RELEASE_BYTE_ARRAY_ELEMENTS: usize = 192;
+
+/// Get a byte array from JNI as a Vec<u8>
+pub fn get_byte_array(env: JNIEnv, array: JByteArray) -> Option<Vec<u8>> {
+    if env.is_null() || array.is_null() {
+        return None;
+    }
+
+    unsafe {
+        let len = get_array_length(env, array);
+        if len <= 0 {
+            return Some(Vec::new());
+        }
+
+        // Get byte array elements
+        type GetByteArrayElementsFn = extern "C" fn(JNIEnv, JByteArray, *mut JBoolean) -> *mut JByte;
+        let get_byte_array_elements: GetByteArrayElementsFn = get_jni_fn(env, JNI_GET_BYTE_ARRAY_ELEMENTS);
+        let elements = get_byte_array_elements(env, array, ptr::null_mut());
+
+        if elements.is_null() {
+            return None;
+        }
+
+        // Copy to Vec
+        let mut result = vec![0u8; len as usize];
+        ptr::copy_nonoverlapping(elements as *const u8, result.as_mut_ptr(), len as usize);
+
+        // Release elements
+        type ReleaseByteArrayElementsFn = extern "C" fn(JNIEnv, JByteArray, *mut JByte, JInt);
+        let release_byte_array_elements: ReleaseByteArrayElementsFn = get_jni_fn(env, JNI_RELEASE_BYTE_ARRAY_ELEMENTS);
+        release_byte_array_elements(env, array, elements, JNI_ABORT);
+
+        Some(result)
+    }
+}
+
+/// Create a new byte array from a slice
+pub fn create_byte_array(env: JNIEnv, data: &[u8]) -> JByteArray {
+    if env.is_null() {
+        return ptr::null_mut();
+    }
+
+    let array = new_byte_array(env, data.len() as JInt);
+    if array.is_null() {
+        return ptr::null_mut();
+    }
+
+    set_byte_array_region(env, array, 0, data.len() as JInt, data.as_ptr() as *const i8);
+    array
+}
+
+/// Get a String from JNI JString
+pub fn get_string(env: JNIEnv, jstring: *mut c_void) -> Option<String> {
+    if env.is_null() || jstring.is_null() {
+        return None;
+    }
+
+    unsafe {
+        type GetStringUtfCharsFn = extern "C" fn(JNIEnv, *mut c_void, *mut JBoolean) -> *const c_char;
+        type ReleaseStringUtfCharsFn = extern "C" fn(JNIEnv, *mut c_void, *const c_char);
+
+        let get_string_utf_chars: GetStringUtfCharsFn = get_jni_fn(env, JNI_GET_STRING_UTF_CHARS);
+        let release_string_utf_chars: ReleaseStringUtfCharsFn = get_jni_fn(env, JNI_RELEASE_STRING_UTF_CHARS);
+
+        let chars = get_string_utf_chars(env, jstring, ptr::null_mut());
+        if chars.is_null() {
+            return None;
+        }
+
+        let result = std::ffi::CStr::from_ptr(chars).to_string_lossy().into_owned();
+        release_string_utf_chars(env, jstring, chars);
+
+        Some(result)
+    }
+}
+

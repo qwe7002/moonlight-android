@@ -217,7 +217,7 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
         if (managerBinder != null && !runningPolling && inForeground) {
             freezeUpdates = false;
             managerBinder.startPolling(details -> {
-                if (!freezeUpdates) {
+                if (!freezeUpdates && !isFinishing() && !isDestroyed()) {
                     PcView.this.runOnUiThread(() -> updateComputer(details));
                 }
             });
@@ -485,6 +485,10 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
                     public void onPairingSuccess(String computerUuid, java.security.cert.X509Certificate serverCert) {
                         runOnUiThread(() -> {
                             Dialog.dismissProgressDialog();
+                            if (isFinishing() || isDestroyed()) {
+                                safeUnbind(conn);
+                                return;
+                            }
                             Toast.makeText(PcView.this, R.string.sunshine_pairing_success, Toast.LENGTH_SHORT).show();
                             // Pin this certificate for later HTTPS use
                             if (managerBinder != null) {
@@ -505,6 +509,10 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
                     public void onPairingFailed(String computerUuid, String message) {
                         runOnUiThread(() -> {
                             Dialog.dismissProgressDialog();
+                            if (isFinishing() || isDestroyed()) {
+                                safeUnbind(conn);
+                                return;
+                            }
                             String errorMsg = message != null ? message : getString(R.string.pair_fail);
                             Dialog.displayDialog(PcView.this,
                                     getString(R.string.pairing_notification_failed_title),

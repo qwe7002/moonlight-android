@@ -23,6 +23,8 @@ cbc = "0.1.2"
 log = "0.4"
 # BoringTun - userspace WireGuard implementation (no system TUN required)
 boringtun = "0.5"
+# X25519 key exchange for WireGuard (same version as boringtun uses)
+x25519-dalek = "2.0.0-rc.3"
 # Base64 for WireGuard key encoding
 base64 = "0.22"
 # Smoltcp for userspace TCP/IP stack over WireGuard tunnel

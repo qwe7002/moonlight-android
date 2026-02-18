@@ -11,44 +11,26 @@
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 
 use boringtun::noise::{Tunn, TunnResult};
-use boringtun::x25519::{PublicKey, StaticSecret};
+use x25519_dalek::{PublicKey, StaticSecret};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
+
+// Re-export configuration from dedicated module
+pub use crate::wireguard_config::WireGuardConfig;
 
 /// Maximum size of a UDP packet
 const MAX_UDP_PACKET_SIZE: usize = 65535;
 
-/// WireGuard keepalive interval in seconds (0 = disabled)
-const DEFAULT_KEEPALIVE_SECS: u16 = 25;
-
 /// Buffer size for WireGuard encapsulation overhead
 const WG_BUFFER_SIZE: usize = MAX_UDP_PACKET_SIZE + 256;
 
-/// Configuration for the WireGuard tunnel
-#[derive(Clone)]
-pub struct WireGuardConfig {
-    /// Local private key (base64-encoded)
-    pub private_key: [u8; 32],
-    /// Peer public key (base64-encoded)
-    pub peer_public_key: [u8; 32],
-    /// Optional preshared key
-    pub preshared_key: Option<[u8; 32]>,
-    /// Peer endpoint (IP:port)
-    pub endpoint: SocketAddr,
-    /// Local tunnel IP address (the virtual IP assigned to this client)
-    pub tunnel_address: IpAddr,
-    /// Keepalive interval in seconds (0 = disabled)
-    pub keepalive_secs: u16,
-    /// MTU for the tunnel
-    pub mtu: u16,
-}
 
 /// State of the WireGuard tunnel
 struct TunnelState {
@@ -359,7 +341,7 @@ impl WireGuardTunnel {
                         _ => {}
                     }
                 }
-                TunnResult::WriteToTunnelV4(data, _addr) | TunnResult::WriteToTunnelV6(data, _addr) => {
+                TunnResult::WriteToTunnelV4(data, _) | TunnResult::WriteToTunnelV6(data, _) => {
                     // Decapsulated IP packet - extract and forward to the right proxy
                     if !st.handshake_completed.load(Ordering::SeqCst) {
                         st.handshake_completed.store(true, Ordering::SeqCst);

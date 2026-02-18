@@ -361,6 +361,16 @@ public class StreamSettings extends AppCompatActivity {
                 });
             }
 
+            // Setup WireGuard advanced settings preference click listener
+            Preference wgAdvancedPref = findPreference("wireguard_advanced_settings");
+            if (wgAdvancedPref != null) {
+                wgAdvancedPref.setOnPreferenceClickListener(preference -> {
+                    android.content.Intent intent = new android.content.Intent(requireActivity(), WireGuardSettingsActivity.class);
+                    startActivity(intent);
+                    return true;
+                });
+            }
+
             Display display = requireActivity().getDisplay();
             assert display != null;
             float maxSupportedFps = display.getRefreshRate();

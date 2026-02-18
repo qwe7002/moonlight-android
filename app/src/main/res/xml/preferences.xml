@@ -247,6 +247,10 @@
     </PreferenceCategory>
     <PreferenceCategory android:title="@string/category_wireguard"
         android:key="category_wireguard">
+        <Preference
+            android:key="wireguard_advanced_settings"
+            android:title="@string/title_wg_advanced_settings"
+            android:summary="@string/summary_wg_advanced_settings" />
         <CheckBoxPreference
             android:key="checkbox_wg_enabled"
             android:title="@string/title_wg_enabled"

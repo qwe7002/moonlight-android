@@ -309,14 +309,18 @@ fn build_opus(config: &DepConfig) {
         build
             .include(&celt_arm_dir)
             .include(&silk_arm_dir)
-            // Enable ARM64 intrinsics for better performance
+            // Enable ARM64 NEON intrinsics for better performance
+            // NOTE: We only use *_INTR defines because the non-INTR versions (OPUS_ARM_PRESUME_NEON)
+            // require 32-bit ARM assembly that is not compatible with ARM64 (aarch64).
+            // The intrinsic versions work properly on ARM64.
             .define("OPUS_ARM_ASM", None)
             .define("OPUS_ARM_MAY_HAVE_NEON_INTR", None)
             .define("OPUS_ARM_PRESUME_NEON_INTR", None);
 
         // CELT ARM NEON sources
+        // Note: arm_celt_map.c is for RTCD (runtime CPU detection), we skip it
+        // since we presume NEON is always available on ARM64
         let celt_arm_sources = [
-            "arm_celt_map.c",
             "celt_neon_intr.c",
             "pitch_neon_intr.c",
         ];
@@ -328,8 +332,9 @@ fn build_opus(config: &DepConfig) {
         }
 
         // SILK ARM NEON sources
+        // Note: arm_silk_map.c is for RTCD (runtime CPU detection), we skip it
+        // since we presume NEON is always available on ARM64
         let silk_arm_sources = [
-            "arm_silk_map.c",
             "biquad_alt_neon_intr.c",
             "LPC_inv_pred_gain_neon_intr.c",
             "NSQ_del_dec_neon_intr.c",

@@ -36,10 +36,17 @@ public class Dialog implements Runnable {
 
     public static void closeDialogs()
     {
+        // Also dismiss progress dialog
+        dismissProgressDialog();
+
         synchronized (rundownDialogs) {
             for (Dialog d : rundownDialogs) {
-                if (d.alert.isShowing()) {
-                    d.alert.dismiss();
+                try {
+                    if (d.alert != null && d.alert.isShowing()) {
+                        d.alert.dismiss();
+                    }
+                } catch (Exception ignored) {
+                    // Dialog may have been destroyed with the activity
                 }
             }
 
@@ -323,12 +330,17 @@ public class Dialog implements Runnable {
      * Dismiss the progress dialog
      */
     public static void dismissProgressDialog() {
-        if (progressDialog != null && progressDialog.isShowing()) {
+        AlertDialog dialog = progressDialog;
+        progressDialog = null;
+
+        if (dialog != null) {
             try {
-                progressDialog.dismiss();
+                if (dialog.isShowing()) {
+                    dialog.dismiss();
+                }
             } catch (Exception ignored) {
+                // Dialog may have been destroyed with the activity
             }
-            progressDialog = null;
         }
     }
 

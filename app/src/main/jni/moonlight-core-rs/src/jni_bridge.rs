@@ -1233,3 +1233,219 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgCreateUdpProxy(
     }
 }
 
+// ============================================================================
+// WireGuardManager JNI Functions
+// ============================================================================
+
+/// Start WireGuard tunnel (WireGuardManager.nativeStartTunnel)
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeStartTunnel(
+    env: JNIEnv,
+    _clazz: JClass,
+    private_key: JByteArray,
+    peer_public_key: JByteArray,
+    preshared_key: JByteArray,
+    endpoint: JString,
+    tunnel_address: JString,
+    keepalive_secs: JInt,
+    mtu: JInt,
+) -> JBoolean {
+    // Get private key bytes
+    let private_key_bytes = match jni_helpers::get_byte_array(env, private_key) {
+        Some(bytes) if bytes.len() == 32 => {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            arr
+        }
+        _ => {
+            error!("nativeStartTunnel: invalid private key");
+            return JNI_FALSE;
+        }
+    };
+
+    // Get peer public key bytes
+    let peer_public_key_bytes = match jni_helpers::get_byte_array(env, peer_public_key) {
+        Some(bytes) if bytes.len() == 32 => {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            arr
+        }
+        _ => {
+            error!("nativeStartTunnel: invalid peer public key");
+            return JNI_FALSE;
+        }
+    };
+
+    // Get optional preshared key
+    let psk_bytes = if !preshared_key.is_null() {
+        match jni_helpers::get_byte_array(env, preshared_key) {
+            Some(bytes) if bytes.len() == 32 => {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                Some(arr)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    // Get endpoint string
+    let endpoint_str = match jni_helpers::get_string(env, endpoint) {
+        Some(s) => s,
+        None => {
+            error!("nativeStartTunnel: invalid endpoint");
+            return JNI_FALSE;
+        }
+    };
+
+    // Get tunnel address string
+    let tunnel_addr_str = match jni_helpers::get_string(env, tunnel_address) {
+        Some(s) => s,
+        None => {
+            error!("nativeStartTunnel: invalid tunnel address");
+            return JNI_FALSE;
+        }
+    };
+
+    // Parse endpoint
+    let endpoint_addr: std::net::SocketAddr = match endpoint_str.parse() {
+        Ok(addr) => addr,
+        Err(e) => {
+            error!("nativeStartTunnel: invalid endpoint format '{}': {}", endpoint_str, e);
+            return JNI_FALSE;
+        }
+    };
+
+    // Parse tunnel address
+    let tunnel_ip: std::net::IpAddr = match tunnel_addr_str.parse() {
+        Ok(ip) => ip,
+        Err(e) => {
+            error!("nativeStartTunnel: invalid tunnel address '{}': {}", tunnel_addr_str, e);
+            return JNI_FALSE;
+        }
+    };
+
+    // Build config
+    let config = crate::wireguard_config::WireGuardConfig {
+        private_key: private_key_bytes,
+        peer_public_key: peer_public_key_bytes,
+        preshared_key: psk_bytes,
+        endpoint: endpoint_addr,
+        tunnel_address: tunnel_ip,
+        keepalive_secs: keepalive_secs as u16,
+        mtu: mtu as u16,
+    };
+
+    // Start tunnel
+    match crate::wireguard::wg_start_tunnel(config) {
+        Ok(()) => {
+            info!("WireGuard tunnel started successfully via JNI");
+            JNI_TRUE
+        }
+        Err(e) => {
+            error!("Failed to start WireGuard tunnel: {}", e);
+            JNI_FALSE
+        }
+    }
+}
+
+/// Stop WireGuard tunnel (WireGuardManager.nativeStopTunnel)
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeStopTunnel(
+    _env: JNIEnv,
+    _clazz: JClass,
+) {
+    crate::wireguard::wg_stop_tunnel();
+    info!("WireGuard tunnel stopped via JNI");
+}
+
+/// Check if tunnel is active (WireGuardManager.nativeIsTunnelActive)
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeIsTunnelActive(
+    _env: JNIEnv,
+    _clazz: JClass,
+) -> JBoolean {
+    if crate::wireguard::wg_is_tunnel_active() {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+/// Generate a new WireGuard private key (WireGuardManager.nativeGeneratePrivateKey)
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeGeneratePrivateKey(
+    env: JNIEnv,
+    _clazz: JClass,
+) -> JByteArray {
+    match crate::wireguard_config::generate_private_key() {
+        Ok(key) => jni_helpers::create_byte_array(env, &key),
+        Err(e) => {
+            error!("Failed to generate private key: {}", e);
+            ptr::null_mut()
+        }
+    }
+}
+
+/// Derive public key from private key (WireGuardManager.nativeDerivePublicKey)
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeDerivePublicKey(
+    env: JNIEnv,
+    _clazz: JClass,
+    private_key: JByteArray,
+) -> JByteArray {
+    let private_key_bytes = match jni_helpers::get_byte_array(env, private_key) {
+        Some(bytes) if bytes.len() == 32 => {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            arr
+        }
+        _ => {
+            error!("nativeDerivePublicKey: invalid private key");
+            return ptr::null_mut();
+        }
+    };
+
+    let public_key = crate::wireguard_config::derive_public_key(&private_key_bytes);
+    jni_helpers::create_byte_array(env, &public_key)
+}
+
+/// Create UDP proxy through WireGuard (WireGuardManager.nativeCreateUdpProxy)
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeCreateUdpProxy(
+    env: JNIEnv,
+    _clazz: JClass,
+    target_host: JString,
+    target_port: JInt,
+) -> JInt {
+    let host_str = match jni_helpers::get_string(env, target_host) {
+        Some(s) => s,
+        None => {
+            error!("nativeCreateUdpProxy: invalid target host");
+            return -1;
+        }
+    };
+
+    let target_ip: std::net::IpAddr = match host_str.parse() {
+        Ok(ip) => ip,
+        Err(e) => {
+            error!("nativeCreateUdpProxy: invalid host '{}': {}", host_str, e);
+            return -1;
+        }
+    };
+
+    let target = std::net::SocketAddr::new(target_ip, target_port as u16);
+
+    match crate::wireguard::wg_create_udp_proxy(target) {
+        Ok(local_addr) => {
+            info!("Created WireGuard UDP proxy via WireGuardManager: local port {} -> {}", local_addr.port(), target);
+            local_addr.port() as JInt
+        }
+        Err(e) => {
+            error!("Failed to create WireGuard UDP proxy: {}", e);
+            -1
+        }
+    }
+}
+

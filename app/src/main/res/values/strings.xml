@@ -332,6 +332,8 @@
 
     <!-- WireGuard Tunnel (boringtun) -->
     <string name="category_wireguard">WireGuard Tunnel</string>
+    <string name="title_wg_advanced_settings">WireGuard Configuration</string>
+    <string name="summary_wg_advanced_settings">Open full WireGuard configuration interface with key generation, import/export</string>
     <string name="title_wg_enabled">Enable WireGuard tunnel</string>
     <string name="summary_wg_enabled">Route streaming traffic through a userspace WireGuard tunnel (no system VPN needed)</string>
     <string name="title_wg_private_key">Private key</string>
@@ -454,4 +456,48 @@
     <string name="sunshine_pairing_failed">Failed to pair: %1$s</string>
     <string name="sunshine_pairing_auth_failed">Authentication failed. Check your username and password.</string>
     <string name="sunshine_pairing_connecting">Connecting to Sunshine server…</string>
+
+    <!-- WireGuard Settings -->
+    <string name="wireguard_settings_title">WireGuard VPN</string>
+    <string name="wireguard_settings_description">Configure WireGuard tunnel for streaming through VPN. This allows streaming over the internet securely.</string>
+    <string name="wireguard_enable">Enable WireGuard Tunnel</string>
+    <string name="wireguard_status_disconnected">Disconnected</string>
+    <string name="wireguard_status_connecting">Connecting…</string>
+    <string name="wireguard_status_connected">Connected</string>
+    <string name="wireguard_status_error">Connection Error</string>
+    <string name="wireguard_test_connection">Test</string>
+    <string name="wireguard_section_local">Interface</string>
+    <string name="wireguard_section_peer">Peer</string>
+    <string name="wireguard_section_advanced">Advanced</string>
+    <string name="wireguard_private_key">Private Key</string>
+    <string name="wireguard_public_key">Public Key (auto-generated)</string>
+    <string name="wireguard_generate_keys">Generate New Keys</string>
+    <string name="wireguard_tunnel_address">Tunnel Address</string>
+    <string name="wireguard_peer_public_key">Peer Public Key</string>
+    <string name="wireguard_peer_endpoint">Peer Endpoint (host:port)</string>
+    <string name="wireguard_preshared_key">Preshared Key (optional)</string>
+    <string name="wireguard_preshared_key_hint">Leave empty if not using PSK</string>
+    <string name="wireguard_mtu">MTU</string>
+    <string name="wireguard_keepalive">Persistent Keepalive</string>
+    <string name="wireguard_keepalive_suffix">seconds</string>
+    <string name="wireguard_import">Import</string>
+    <string name="wireguard_export">Export</string>
+    <string name="wireguard_save">Save Configuration</string>
+    <string name="wireguard_config_saved">WireGuard configuration saved</string>
+    <string name="wireguard_config_error">Configuration error: %1$s</string>
+    <string name="wireguard_invalid_private_key">Invalid private key format</string>
+    <string name="wireguard_invalid_public_key">Invalid peer public key format</string>
+    <string name="wireguard_invalid_endpoint">Invalid endpoint format (use host:port)</string>
+    <string name="wireguard_invalid_address">Invalid tunnel address</string>
+    <string name="wireguard_keys_generated">New keys generated</string>
+    <string name="wireguard_public_key_copied">Public key copied to clipboard</string>
+    <string name="wireguard_connection_success">Connection test successful</string>
+    <string name="wireguard_connection_failed">Connection test failed: %1$s</string>
+    <string name="wireguard_handshake_timeout">Handshake timed out</string>
+    <string name="wireguard_import_title">Import WireGuard Config</string>
+    <string name="wireguard_export_title">Export WireGuard Config</string>
+    <string name="wireguard_import_success">Configuration imported successfully</string>
+    <string name="wireguard_import_failed">Failed to import configuration: %1$s</string>
+    <string name="wireguard_export_success">Configuration exported successfully</string>
+    <string name="wireguard_confirm_generate_keys">Generate new keys? This will replace your current keys.</string>
 </resources>
