@@ -162,26 +162,6 @@
 
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- Server Address (gaming server's IP in WireGuard tunnel) -->
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/layout_server_address"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:hint="@string/wireguard_server_address"
-            app:helperText="@string/wireguard_server_address_hint">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/edit_server_address"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="text"
-                android:singleLine="true"
-                android:text="10.0.0.1" />
-
-        </com.google.android.material.textfield.TextInputLayout>
-
         <!-- Peer Configuration Section -->
         <TextView
             android:layout_width="match_parent"

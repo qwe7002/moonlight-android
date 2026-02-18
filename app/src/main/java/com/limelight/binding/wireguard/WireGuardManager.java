@@ -1,10 +1,9 @@
-package com.limelight.binding.video;
+package com.limelight.binding.wireguard;
 
 import android.util.Base64;
 import android.util.Log;
 
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 
 /**
  * WireGuard tunnel manager that interfaces with the Rust native library.
@@ -283,64 +282,6 @@ public class WireGuardManager {
         }
     }
 
-    /**
-     * Create a UDP proxy through the WireGuard tunnel
-     * @param targetHost Target host in the tunnel
-     * @param targetPort Target port in the tunnel
-     * @return Local port to connect to, or -1 on error
-     */
-    public static int createUdpProxy(String targetHost, int targetPort) {
-        if (!isActive) {
-            Log.e(TAG, "Cannot create UDP proxy: tunnel not active");
-            return -1;
-        }
-        return nativeCreateUdpProxy(targetHost, targetPort);
-    }
-
-    // ========================================================================
-    // TCP Proxy through WireGuard (for HTTPS traffic)
-    // ========================================================================
-
-    /**
-     * Create a TCP proxy for a specific target port through the WireGuard tunnel.
-     * This allows HTTPS traffic to be tunneled: Java handles TLS, Rust handles transport.
-     * Requires WireGuard HTTP config to be set first via configureHttp().
-     *
-     * @param targetPort The target port on the server to proxy to
-     * @return Local port to connect to (>0) on success, -1 on error
-     */
-    public static int createTcpProxy(int targetPort) {
-        if (!httpConfigured) {
-            Log.e(TAG, "Cannot create TCP proxy: WireGuard HTTP not configured");
-            return -1;
-        }
-
-        int localPort = nativeHttpCreateTcpProxy(targetPort);
-        if (localPort > 0) {
-            Log.i(TAG, "TCP proxy created: 127.0.0.1:" + localPort + " -> server:" + targetPort);
-        }
-        return localPort;
-    }
-
-    /**
-     * Stop all TCP proxies created through WireGuard HTTP config
-     */
-    public static void stopTcpProxies() {
-        nativeHttpStopTcpProxies();
-        Log.i(TAG, "All TCP proxies stopped");
-    }
-
-    /**
-     * Get the local port for a TCP proxy targeting a specific port
-     * @param targetPort The target port
-     * @return Local proxy port, or -1 if no proxy exists
-     */
-    public static int getTcpProxyPort(int targetPort) {
-        int result = nativeHttpGetProxyPort(targetPort);
-        Log.i(TAG, "getTcpProxyPort(" + targetPort + ") = " + result);
-        return result;
-    }
-
     // Native methods implemented in Rust
     private static native boolean nativeStartTunnel(
         byte[] privateKey,
@@ -356,12 +297,6 @@ public class WireGuardManager {
     private static native boolean nativeIsTunnelActive();
     private static native byte[] nativeGeneratePrivateKey();
     private static native byte[] nativeDerivePublicKey(byte[] privateKey);
-    private static native int nativeCreateUdpProxy(String targetHost, int targetPort);
-
-    // TCP proxy native methods (for HTTPS through WireGuard)
-    private static native int nativeHttpCreateTcpProxy(int targetPort);
-    private static native void nativeHttpStopTcpProxies();
-    private static native int nativeHttpGetProxyPort(int targetPort);
 
     // ========================================================================
     // Direct HTTP through WireGuard (bypasses OkHttp)

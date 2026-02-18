@@ -346,8 +346,6 @@
     <string name="summary_wg_endpoint">WireGuard peer endpoint (IP:port, e.g. 1.2.3.4:51820)</string>
     <string name="title_wg_tunnel_address">Tunnel address</string>
     <string name="summary_wg_tunnel_address">Your IP address inside the WireGuard tunnel (e.g. 10.0.0.2)</string>
-    <string name="title_wg_server_address">Server address in tunnel</string>
-    <string name="summary_wg_server_address">The streaming server\'s IP address inside the WireGuard tunnel (e.g. 10.0.0.1)</string>
     <string name="wg_not_configured">WireGuard is not fully configured</string>
     <string name="wg_tunnel_failed">WireGuard tunnel failed to start: %s</string>
     <string name="wg_handshake_timeout">WireGuard handshake timed out</string>
@@ -473,8 +471,6 @@
     <string name="wireguard_public_key">Public Key (auto-generated)</string>
     <string name="wireguard_generate_keys">Generate New Keys</string>
     <string name="wireguard_tunnel_address">Tunnel Address</string>
-    <string name="wireguard_server_address">Server Address in Tunnel</string>
-    <string name="wireguard_server_address_hint">The gaming server\'s IP in the WireGuard network (e.g. 10.0.0.1)</string>
     <string name="wireguard_peer_public_key">Peer Public Key</string>
     <string name="wireguard_peer_endpoint">Peer Endpoint (host:port)</string>
     <string name="wireguard_preshared_key">Preshared Key (optional)</string>

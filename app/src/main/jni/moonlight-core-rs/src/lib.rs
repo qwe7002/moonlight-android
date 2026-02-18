@@ -28,6 +28,8 @@ pub mod tun_stack;
 #[cfg(target_os = "android")]
 pub mod wg_http;
 #[cfg(target_os = "android")]
+pub mod wg_socket;
+#[cfg(target_os = "android")]
 pub mod platform_sockets;
 
 #[cfg(target_os = "android")]

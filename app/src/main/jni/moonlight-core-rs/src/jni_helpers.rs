@@ -669,6 +669,7 @@ const JNI_GET_STRING_UTF_CHARS: usize = 169;
 const JNI_RELEASE_STRING_UTF_CHARS: usize = 170;
 const JNI_GET_BYTE_ARRAY_ELEMENTS: usize = 184;
 const JNI_RELEASE_BYTE_ARRAY_ELEMENTS: usize = 192;
+const JNI_GET_BYTE_ARRAY_REGION: usize = 200;
 
 /// Get a byte array from JNI as a Vec<u8>
 pub fn get_byte_array(env: JNIEnv, array: JByteArray) -> Option<Vec<u8>> {
@@ -701,6 +702,29 @@ pub fn get_byte_array(env: JNIEnv, array: JByteArray) -> Option<Vec<u8>> {
         release_byte_array_elements(env, array, elements, JNI_ABORT);
 
         Some(result)
+    }
+}
+
+/// Get a region of a byte array from JNI as a Vec<u8>
+pub fn get_byte_array_region(env: JNIEnv, array: JByteArray, start: JInt, len: JInt) -> Option<Vec<u8>> {
+    if env.is_null() || array.is_null() || len <= 0 {
+        return None;
+    }
+
+    unsafe {
+        let array_len = get_array_length(env, array);
+        if start < 0 || start + len > array_len {
+            return None;
+        }
+
+        let mut result = vec![0i8; len as usize];
+        
+        type GetByteArrayRegionFn = extern "C" fn(JNIEnv, JByteArray, JInt, JInt, *mut JByte);
+        let get_byte_array_region: GetByteArrayRegionFn = get_jni_fn(env, JNI_GET_BYTE_ARRAY_REGION);
+        get_byte_array_region(env, array, start, len, result.as_mut_ptr());
+
+        // Convert i8 to u8
+        Some(result.into_iter().map(|b| b as u8).collect())
     }
 }
 

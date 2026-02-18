@@ -16,7 +16,7 @@ import android.util.Log;
 import com.limelight.PcView;
 import com.limelight.R;
 import com.limelight.binding.PlatformBinding;
-import com.limelight.binding.video.WireGuardManager;
+import com.limelight.binding.wireguard.WireGuardManager;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.nvstream.http.PairingManager;
@@ -54,7 +54,6 @@ public class PairingService extends Service {
     
     // WireGuard proxy state
     private volatile boolean wgProxyStarted = false;
-    private String wgServerAddress = null;
 
     public interface PairingListener {
         void onPairingSuccess(String computerUuid, X509Certificate serverCert);
@@ -226,10 +225,10 @@ public class PairingService extends Service {
         boolean success = false;
 
         // Setup WireGuard proxy if enabled
-        setupWireGuardProxy();
+        setupWireGuardProxy(computerAddress);
         
-        // Use effective address (WireGuard server address if enabled)
-        String effectiveAddress = getEffectiveAddress(computerAddress);
+        // Use the computer address directly (WireGuard routing handled by JNI layer)
+        String effectiveAddress = computerAddress;
 
         try {
             java.security.cert.X509Certificate serverCert = null;
@@ -367,42 +366,6 @@ public class PairingService extends Service {
     }
 
     /**
-     * Ensure a TCP proxy for Sunshine API port 47990 exists.
-     * If WireGuard is enabled but the proxy doesn't exist yet, try to create it.
-     * @return Local proxy port (>0) if available, -1 if WG not enabled or proxy creation failed
-     */
-    private int ensureSunshineProxyPort() {
-        Log.i(TAG, "ensureSunshineProxyPort called, wgProxyStarted=" + wgProxyStarted);
-        if (!wgProxyStarted) {
-            Log.w(TAG, "WireGuard proxy not started, cannot provide Sunshine proxy port");
-            return -1;
-        }
-        
-        int proxyPort = WireGuardManager.getTcpProxyPort(47990);
-        Log.i(TAG, "WireGuardManager.getTcpProxyPort(47990) returned " + proxyPort);
-        if (proxyPort > 0) {
-            Log.i(TAG, "Sunshine API proxy already exists on port " + proxyPort);
-            return proxyPort;
-        }
-        
-        // Proxy not found - try to create it with retries
-        Log.w(TAG, "Sunshine API proxy for port 47990 not found (getTcpProxyPort returned " + proxyPort + "), creating...");
-        for (int attempt = 0; attempt < 3; attempt++) {
-            if (attempt > 0) {
-                Log.i(TAG, "Retrying Sunshine proxy creation (attempt " + (attempt + 1) + ")");
-                try { Thread.sleep(100); } catch (InterruptedException ignored) {}
-            }
-            proxyPort = WireGuardManager.createTcpProxy(47990);
-            if (proxyPort > 0) {
-                Log.i(TAG, "Sunshine API proxy created on-the-fly on port " + proxyPort);
-                return proxyPort;
-            }
-        }
-        Log.e(TAG, "Failed to create Sunshine API proxy for port 47990 after retries");
-        return proxyPort;
-    }
-
-    /**
      * Verify Sunshine credentials by calling a simple API endpoint
      *
      * @return HTTP response code (200 = success, 401 = auth failed, -2 = endpoint not found, -1 = error)
@@ -450,20 +413,7 @@ public class PairingService extends Service {
             javax.net.ssl.HostnameVerifier trustAllHostnames = (hostname, session) -> true;
 
             java.net.URL apiUrl = new java.net.URL(url);
-            Log.i(TAG, "verifySunshineCredentials: initial URL=" + url + ", wgProxyStarted=" + wgProxyStarted);
-
-            // Use TCP proxy through WireGuard if available
-            int proxyPort = ensureSunshineProxyPort();
-            Log.i(TAG, "verifySunshineCredentials: ensureSunshineProxyPort returned " + proxyPort);
-            if (proxyPort > 0) {
-                String proxyUrl = "https://127.0.0.1:" + proxyPort + "/api/apps";
-                Log.i(TAG, "Using WireGuard TCP proxy for Sunshine API: " + proxyUrl);
-                apiUrl = new java.net.URL(proxyUrl);
-            } else if (wgProxyStarted) {
-                Log.e(TAG, "WireGuard enabled but no proxy available for port 47990, direct connection will likely fail");
-            } else {
-                Log.i(TAG, "WireGuard not enabled, using direct connection to " + url);
-            }
+            Log.i(TAG, "verifySunshineCredentials: URL=" + url + ", wgProxyStarted=" + wgProxyStarted);
 
             connection = (javax.net.ssl.HttpsURLConnection) apiUrl.openConnection();
             Log.i(TAG, "verifySunshineCredentials: connecting to " + apiUrl.toString());
@@ -559,20 +509,7 @@ public class PairingService extends Service {
             javax.net.ssl.HostnameVerifier trustAllHostnames = (hostname, session) -> true;
 
             java.net.URL apiUrl = new java.net.URL(url);
-            Log.i(TAG, "sendPinToSunshine: initial URL=" + url + ", wgProxyStarted=" + wgProxyStarted);
-
-            // Use TCP proxy through WireGuard if available
-            int proxyPort = ensureSunshineProxyPort();
-            Log.i(TAG, "sendPinToSunshine: ensureSunshineProxyPort returned " + proxyPort);
-            if (proxyPort > 0) {
-                String proxyUrl = "https://127.0.0.1:" + proxyPort + "/api/pin";
-                Log.i(TAG, "Using WireGuard TCP proxy for Sunshine PIN API: " + proxyUrl);
-                apiUrl = new java.net.URL(proxyUrl);
-            } else if (wgProxyStarted) {
-                Log.e(TAG, "WireGuard enabled but no proxy available for port 47990, PIN submission will likely fail");
-            } else {
-                Log.i(TAG, "WireGuard not enabled, using direct connection for PIN API");
-            }
+            Log.i(TAG, "sendPinToSunshine: URL=" + url + ", wgProxyStarted=" + wgProxyStarted);
 
             connection = (javax.net.ssl.HttpsURLConnection) apiUrl.openConnection();
 
@@ -661,25 +598,25 @@ public class PairingService extends Service {
     }
     
     /**
-     * Set up WireGuard direct HTTP and TCP proxy for pairing if enabled in preferences
+     * Set up WireGuard direct HTTP for pairing if enabled in preferences
+     * @param computerAddress The target server address to route through WireGuard
      */
-    private void setupWireGuardProxy() {
+    private void setupWireGuardProxy(String computerAddress) {
         SharedPreferences wgPrefs = getSharedPreferences("wireguard_config", Context.MODE_PRIVATE);
         boolean wgEnabled = wgPrefs.getBoolean("wg_enabled", false);
-        Log.i(TAG, "setupWireGuardProxy: wg_enabled=" + wgEnabled);
+        Log.i(TAG, "setupWireGuardProxy: wg_enabled=" + wgEnabled + ", computerAddress=" + computerAddress);
         
         if (!wgEnabled) {
             return;
         }
         
-        wgServerAddress = wgPrefs.getString("wg_server_address", "");
         String wgPrivateKey = wgPrefs.getString("wg_private_key", "");
         String wgPeerPublicKey = wgPrefs.getString("wg_peer_public_key", "");
         String wgPresharedKey = wgPrefs.getString("wg_preshared_key", "");
         String wgEndpoint = wgPrefs.getString("wg_peer_endpoint", "");
         String wgTunnelAddress = wgPrefs.getString("wg_tunnel_address", "10.0.0.2");
         
-        if (wgServerAddress.isEmpty() || wgPrivateKey.isEmpty() || wgPeerPublicKey.isEmpty() || wgEndpoint.isEmpty()) {
+        if (wgPrivateKey.isEmpty() || wgPeerPublicKey.isEmpty() || wgEndpoint.isEmpty()) {
             Log.w(TAG, "WireGuard enabled but configuration incomplete");
             return;
         }
@@ -692,34 +629,12 @@ public class PairingService extends Service {
                     .setEndpoint(wgEndpoint)
                     .setTunnelAddress(wgTunnelAddress);
             
-            // Configure direct WireGuard HTTP (bypasses OkHttp via JNI for HTTP,
-            // TCP proxy through WireGuard for HTTPS)
-            if (WireGuardManager.configureHttp(wgConfig, wgServerAddress)) {
+            // Configure direct WireGuard HTTP (bypasses OkHttp via JNI)
+            // Use the target computer address for routing
+            if (WireGuardManager.configureHttp(wgConfig, computerAddress)) {
                 NvHTTP.setUseDirectWgHttp(true);
-                
-                // Create TCP proxy for Sunshine HTTPS API (port 47990) with retry
-                int sunshineProxyPort = -1;
-                for (int attempt = 0; attempt < 3 && sunshineProxyPort <= 0; attempt++) {
-                    if (attempt > 0) {
-                        Log.i(TAG, "Retrying TCP proxy creation for port 47990 (attempt " + (attempt + 1) + ")");
-                        try { Thread.sleep(100); } catch (InterruptedException ignored) {}
-                    }
-                    sunshineProxyPort = WireGuardManager.createTcpProxy(47990);
-                }
-                
-                if (sunshineProxyPort > 0) {
-                    Log.i(TAG, "TCP proxy for Sunshine API created on port " + sunshineProxyPort);
-                    // Verify the proxy is accessible
-                    int verifyPort = WireGuardManager.getTcpProxyPort(47990);
-                    Log.i(TAG, "Sunshine API proxy verification: getTcpProxyPort(47990) = " + verifyPort);
-                    wgProxyStarted = true;
-                    Log.i(TAG, "WireGuard configured for pairing (HTTP via JNI, HTTPS via TCP proxy)");
-                } else {
-                    Log.e(TAG, "Failed to create TCP proxy for Sunshine API port 47990 after retries");
-                    // Still enable WireGuard for HTTP but warn about HTTPS
-                    wgProxyStarted = true;
-                    Log.w(TAG, "WireGuard HTTP enabled but HTTPS proxy may not work");
-                }
+                wgProxyStarted = true;
+                Log.i(TAG, "WireGuard configured for pairing to " + computerAddress);
             } else {
                 Log.e(TAG, "Failed to configure WireGuard HTTP for pairing");
             }
@@ -729,7 +644,7 @@ public class PairingService extends Service {
     }
     
     /**
-     * Stop WireGuard HTTP and TCP proxies if we started them
+     * Stop WireGuard HTTP if we started it
      */
     private void stopWireGuardProxy() {
         if (wgProxyStarted) {
@@ -737,21 +652,8 @@ public class PairingService extends Service {
             WireGuardManager.clearHttpConfig();
             NvHTTP.setUseDirectWgHttp(false);
             
-            // Stop TCP proxies
-            WireGuardManager.stopTcpProxies();
-            
             wgProxyStarted = false;
             Log.i(TAG, "WireGuard stopped after pairing");
         }
-    }
-    
-    /**
-     * Get the address to use for connections (WireGuard server address if enabled, original otherwise)
-     */
-    private String getEffectiveAddress(String originalAddress) {
-        if (wgProxyStarted && wgServerAddress != null && !wgServerAddress.isEmpty()) {
-            return wgServerAddress;
-        }
-        return originalAddress;
     }
 }

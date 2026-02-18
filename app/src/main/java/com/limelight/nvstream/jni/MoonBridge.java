@@ -490,18 +490,6 @@ public class MoonBridge {
     public static native boolean wgIsTunnelActive();
 
     /**
-     * Create a UDP proxy through the WireGuard tunnel.
-     * Returns a local port number that moonlight-common-c should use instead of
-     * directly connecting to the remote server. Traffic sent to this local port
-     * will be tunneled through WireGuard to the target address.
-     *
-     * @param targetAddr The real server IP address
-     * @param targetPort The real server port
-     * @return Local proxy port number (>0) on success, 0 on failure
-     */
-    public static native int wgCreateUdpProxy(String targetAddr, int targetPort);
-
-    /**
      * Create streaming UDP proxies for all moonlight ports (video, control, audio).
      * These proxies bind to the same ports locally (47998, 47999, 48000) for transparent forwarding.
      * After calling this, use 127.0.0.1 as the server address.
@@ -513,39 +501,15 @@ public class MoonBridge {
     public static native boolean wgCreateStreamingProxies(String targetAddr, int basePort);
 
     /**
-     * Create a TCP proxy through WireGuard for native streaming (RTSP/control).
-     * Each incoming connection gets its own WireGuard tunnel for isolation.
+     * Enable direct WireGuard routing for UDP traffic.
+     * This enables zero-copy routing: sendto calls targeting the WG server IP
+     * are intercepted at the socket layer and encapsulated directly through the WG tunnel.
+     * No local proxy is created - use the actual WG server IP as the host.
      *
-     * @param privateKey      32-byte private key
-     * @param peerPublicKey   32-byte peer public key
-     * @param presharedKey    32-byte preshared key (can be null)
-     * @param endpoint        WireGuard endpoint as "host:port"
-     * @param tunnelAddress   Local tunnel IP (e.g., "10.0.0.2")
-     * @param targetAddress   Target address to connect to (e.g., "10.0.0.1")
-     * @param targetPort      Target port
-     * @param keepaliveSecs   Keepalive interval
-     * @param mtu             MTU size
-     * @return Local proxy port (>0) on success, -1 on failure
+     * @param serverAddr The WireGuard server IP address (e.g., "10.0.0.1")
+     * @return true on success, false on failure
      */
-    public static native int wgCreateTcpProxy(byte[] privateKey, byte[] peerPublicKey,
-                                              byte[] presharedKey, String endpoint,
-                                              String tunnelAddress, String targetAddress,
-                                              int targetPort, int keepaliveSecs, int mtu);
-
-    /**
-     * Stop the TCP proxy.
-     */
-    public static native void wgStopTcpProxy();
-
-    /**
-     * Check if TCP proxy is running.
-     */
-    public static native boolean wgIsTcpProxyRunning();
-
-    /**
-     * Get TCP proxy port.
-     */
-    public static native int wgGetTcpProxyPort();
+    public static native boolean wgEnableDirectRouting(String serverAddr);
 
     /**
      * Parse a base64-encoded WireGuard key into raw 32 bytes.

@@ -1192,47 +1192,6 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgIsTunnelActive(
     }
 }
 
-/// Create a UDP proxy through the WireGuard tunnel
-/// Parameters:
-///   targetAddr: target address string (the real server IP)
-///   targetPort: target port
-/// Returns: the local port to connect to (>0) on success, 0 on failure
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgCreateUdpProxy(
-    env: JNIEnv,
-    _clazz: JClass,
-    target_addr: JString,
-    target_port: JInt,
-) -> JInt {
-    let addr_str = unsafe { jni_get_string_utf_chars(env, target_addr) };
-    if addr_str.is_null() {
-        return 0;
-    }
-    let addr = unsafe { CStr::from_ptr(addr_str) }.to_string_lossy().to_string();
-    unsafe { jni_release_string_utf_chars(env, target_addr, addr_str) };
-
-    let target_ip: std::net::IpAddr = match addr.parse() {
-        Ok(ip) => ip,
-        Err(e) => {
-            error!("wgCreateUdpProxy: invalid address '{}': {}", addr, e);
-            return 0;
-        }
-    };
-
-    let target = std::net::SocketAddr::new(target_ip, target_port as u16);
-
-    match crate::wireguard::wg_create_udp_proxy(target) {
-        Ok(local_addr) => {
-            info!("Created WireGuard UDP proxy: local port {} -> {}", local_addr.port(), target);
-            local_addr.port() as JInt
-        }
-        Err(e) => {
-            error!("Failed to create WireGuard UDP proxy: {}", e);
-            0
-        }
-    }
-}
-
 /// Create streaming UDP proxies for all moonlight ports (47998, 47999, 48000).
 /// These proxies bind to the same ports locally for transparent forwarding.
 /// 
@@ -1274,13 +1233,56 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgCreateStreamingPr
     }
 }
 
+/// Enable direct WireGuard routing for UDP traffic.
+/// JNI interface: MoonBridge.wgEnableDirectRouting(String serverAddr)
+///
+/// This enables zero-copy routing: sendto calls targeting the WG server IP
+/// are intercepted and encapsulated directly through the WG tunnel.
+/// No local proxy is created - use the actual WG server IP as the host.
+///
+/// Arguments:
+///   serverAddr: WireGuard server IP address string (e.g., "10.0.0.1")
+/// Returns: true on success, false on failure
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgEnableDirectRouting(
+    env: JNIEnv,
+    _clazz: JClass,
+    server_addr: JString,
+) -> JBoolean {
+    let addr_str = unsafe { jni_get_string_utf_chars(env, server_addr) };
+    if addr_str.is_null() {
+        return JNI_FALSE;
+    }
+    let addr = unsafe { CStr::from_ptr(addr_str) }.to_string_lossy().to_string();
+    unsafe { jni_release_string_utf_chars(env, server_addr, addr_str) };
+
+    let server_ip: std::net::Ipv4Addr = match addr.parse() {
+        Ok(ip) => ip,
+        Err(e) => {
+            error!("wgEnableDirectRouting: invalid address '{}': {}", addr, e);
+            return JNI_FALSE;
+        }
+    };
+
+    match crate::wireguard::wg_enable_direct_routing(server_ip) {
+        Ok(()) => {
+            info!("Direct WireGuard routing enabled for server {}", server_ip);
+            JNI_TRUE
+        }
+        Err(e) => {
+            error!("Failed to enable direct WireGuard routing: {}", e);
+            JNI_FALSE
+        }
+    }
+}
+
 // ============================================================================
 // WireGuardManager JNI Functions
 // ============================================================================
 
 /// Start WireGuard tunnel (WireGuardManager.nativeStartTunnel)
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeStartTunnel(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeStartTunnel(
     env: JNIEnv,
     _clazz: JClass,
     private_key: JByteArray,
@@ -1393,7 +1395,7 @@ pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeStartT
 
 /// Stop WireGuard tunnel (WireGuardManager.nativeStopTunnel)
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeStopTunnel(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeStopTunnel(
     _env: JNIEnv,
     _clazz: JClass,
 ) {
@@ -1403,7 +1405,7 @@ pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeStopTu
 
 /// Check if tunnel is active (WireGuardManager.nativeIsTunnelActive)
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeIsTunnelActive(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeIsTunnelActive(
     _env: JNIEnv,
     _clazz: JClass,
 ) -> JBoolean {
@@ -1416,7 +1418,7 @@ pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeIsTunn
 
 /// Generate a new WireGuard private key (WireGuardManager.nativeGeneratePrivateKey)
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeGeneratePrivateKey(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeGeneratePrivateKey(
     env: JNIEnv,
     _clazz: JClass,
 ) -> JByteArray {
@@ -1431,7 +1433,7 @@ pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeGenera
 
 /// Derive public key from private key (WireGuardManager.nativeDerivePublicKey)
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeDerivePublicKey(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeDerivePublicKey(
     env: JNIEnv,
     _clazz: JClass,
     private_key: JByteArray,
@@ -1452,246 +1454,6 @@ pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeDerive
     jni_helpers::create_byte_array(env, &public_key)
 }
 
-/// Create UDP proxy through WireGuard (WireGuardManager.nativeCreateUdpProxy)
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeCreateUdpProxy(
-    env: JNIEnv,
-    _clazz: JClass,
-    target_host: JString,
-    target_port: JInt,
-) -> JInt {
-    let host_str = match jni_helpers::get_string(env, target_host) {
-        Some(s) => s,
-        None => {
-            error!("nativeCreateUdpProxy: invalid target host");
-            return -1;
-        }
-    };
-
-    let target_ip: std::net::IpAddr = match host_str.parse() {
-        Ok(ip) => ip,
-        Err(e) => {
-            error!("nativeCreateUdpProxy: invalid host '{}': {}", host_str, e);
-            return -1;
-        }
-    };
-
-    let target = std::net::SocketAddr::new(target_ip, target_port as u16);
-
-    match crate::wireguard::wg_create_udp_proxy(target) {
-        Ok(local_addr) => {
-            info!("Created WireGuard UDP proxy via WireGuardManager: local port {} -> {}", local_addr.port(), target);
-            local_addr.port() as JInt
-        }
-        Err(e) => {
-            error!("Failed to create WireGuard UDP proxy: {}", e);
-            -1
-        }
-    }
-}
-
-// ============================================================================
-// TCP Proxy JNI Functions (for native streaming)
-// ============================================================================
-
-/// Create a TCP proxy for native streaming (MoonBridge.wgCreateTcpProxy)
-/// This creates a local TCP listener that relays connections through WireGuard.
-/// Each connection gets its own WireGuard tunnel instance.
-/// 
-/// Parameters:
-///   private_key: 32-byte private key
-///   peer_public_key: 32-byte peer public key
-///   preshared_key: 32-byte preshared key (optional, can be null)
-///   endpoint: WireGuard endpoint as "host:port"
-///   tunnel_address: Local tunnel IP (e.g., "10.0.0.2")
-///   target_address: Target address to connect to (e.g., "10.0.0.1")
-///   target_port: Target port
-///   keepalive_secs: Keepalive interval
-///   mtu: MTU size
-///
-/// Returns: local port to connect to (>0) on success, -1 on failure
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgCreateTcpProxy(
-    env: JNIEnv,
-    _clazz: JClass,
-    private_key: JByteArray,
-    peer_public_key: JByteArray,
-    preshared_key: JByteArray,
-    endpoint: JString,
-    tunnel_address: JString,
-    target_address: JString,
-    target_port: JInt,
-    keepalive_secs: JInt,
-    mtu: JInt,
-) -> JInt {
-    // Get private key bytes
-    let private_key_bytes = match jni_helpers::get_byte_array(env, private_key) {
-        Some(bytes) if bytes.len() == 32 => {
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&bytes);
-            arr
-        }
-        _ => {
-            error!("wgCreateTcpProxy: invalid private key");
-            return -1;
-        }
-    };
-
-    // Get peer public key bytes
-    let peer_public_key_bytes = match jni_helpers::get_byte_array(env, peer_public_key) {
-        Some(bytes) if bytes.len() == 32 => {
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&bytes);
-            arr
-        }
-        _ => {
-            error!("wgCreateTcpProxy: invalid peer public key");
-            return -1;
-        }
-    };
-
-    // Get optional preshared key
-    let psk_bytes = if !preshared_key.is_null() {
-        match jni_helpers::get_byte_array(env, preshared_key) {
-            Some(bytes) if bytes.len() == 32 => {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                Some(arr)
-            }
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    // Get endpoint string
-    let endpoint_ptr = unsafe { jni_get_string_utf_chars(env, endpoint) };
-    if endpoint_ptr.is_null() {
-        error!("wgCreateTcpProxy: null endpoint");
-        return -1;
-    }
-    let endpoint_str = unsafe { CStr::from_ptr(endpoint_ptr) }.to_string_lossy().to_string();
-    unsafe { jni_release_string_utf_chars(env, endpoint, endpoint_ptr) };
-
-    // Get tunnel address string
-    let tunnel_addr_ptr = unsafe { jni_get_string_utf_chars(env, tunnel_address) };
-    if tunnel_addr_ptr.is_null() {
-        error!("wgCreateTcpProxy: null tunnel address");
-        return -1;
-    }
-    let tunnel_addr_str = unsafe { CStr::from_ptr(tunnel_addr_ptr) }.to_string_lossy().to_string();
-    unsafe { jni_release_string_utf_chars(env, tunnel_address, tunnel_addr_ptr) };
-
-    // Get target address string
-    let target_addr_ptr = unsafe { jni_get_string_utf_chars(env, target_address) };
-    if target_addr_ptr.is_null() {
-        error!("wgCreateTcpProxy: null target address");
-        return -1;
-    }
-    let target_addr_str = unsafe { CStr::from_ptr(target_addr_ptr) }.to_string_lossy().to_string();
-    unsafe { jni_release_string_utf_chars(env, target_address, target_addr_ptr) };
-
-    // Parse endpoint
-    let endpoint_addr: std::net::SocketAddr = match endpoint_str.parse() {
-        Ok(addr) => addr,
-        Err(e) => {
-            error!("wgCreateTcpProxy: invalid endpoint '{}': {}", endpoint_str, e);
-            return -1;
-        }
-    };
-
-    // Parse tunnel address
-    let tunnel_ip: std::net::Ipv4Addr = match tunnel_addr_str.parse() {
-        Ok(ip) => ip,
-        Err(e) => {
-            error!("wgCreateTcpProxy: invalid tunnel address '{}': {}", tunnel_addr_str, e);
-            return -1;
-        }
-    };
-
-    // Parse target address
-    let target_ip: std::net::Ipv4Addr = match target_addr_str.parse() {
-        Ok(ip) => ip,
-        Err(e) => {
-            error!("wgCreateTcpProxy: invalid target address '{}': {}", target_addr_str, e);
-            return -1;
-        }
-    };
-
-    // Build WireGuard HTTP config for the shared TCP proxy
-    // This allows the TCP proxy to route through the streaming tunnel when active
-    let wg_http_config = crate::wg_http::WgHttpConfig {
-        private_key: private_key_bytes,
-        peer_public_key: peer_public_key_bytes,
-        preshared_key: psk_bytes,
-        endpoint: endpoint_addr,
-        tunnel_ip: tunnel_ip,
-        server_ip: target_ip,
-        keepalive_secs: keepalive_secs as u16,
-        mtu: mtu as u16,
-    };
-
-    // Configure the shared HTTP/TCP proxy module
-    // This allows TCP proxy to route through the streaming WG tunnel when active
-    crate::wg_http::wg_http_set_config(wg_http_config);
-
-    // Create TCP proxy using the shared approach
-    // This routes through the streaming tunnel when active, avoiding WG session conflicts
-    // (moonlight-common-c expects RTSP on port 47989/48010)
-    match crate::wg_http::wg_http_create_tcp_proxy(target_port as u16) {
-        Ok(port) => {
-            info!("Created WireGuard TCP proxy on port {} -> {}:{} (via shared tunnel)", 
-                  port, target_ip, target_port);
-            port as JInt
-        }
-        Err(e) => {
-            error!("Failed to create WireGuard TCP proxy: {}", e);
-            -1
-        }
-    }
-}
-
-/// Stop the TCP proxy (MoonBridge.wgStopTcpProxy)
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgStopTcpProxy(
-    _env: JNIEnv,
-    _clazz: JClass,
-) {
-    // Stop both the old wireguard TCP proxy and the new wg_http proxies
-    crate::wireguard::stop_tcp_proxy();
-    crate::wg_http::wg_http_stop_tcp_proxies();
-    info!("WireGuard TCP proxies stopped");
-}
-
-/// Check if TCP proxy is running (MoonBridge.wgIsTcpProxyRunning)
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgIsTcpProxyRunning(
-    _env: JNIEnv,
-    _clazz: JClass,
-) -> JBoolean {
-    // Check both old and new proxy systems
-    if crate::wireguard::is_tcp_proxy_running() || crate::wg_http::wg_http_is_any_tcp_proxy_running() {
-        JNI_TRUE
-    } else {
-        JNI_FALSE
-    }
-}
-
-/// Get TCP proxy port (MoonBridge.wgGetTcpProxyPort)
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgGetTcpProxyPort(
-    _env: JNIEnv,
-    _clazz: JClass,
-) -> JInt {
-    // Try new wg_http proxy first, fall back to old wireguard proxy
-    let port = crate::wg_http::wg_http_get_first_proxy_port();
-    if port > 0 {
-        port as JInt
-    } else {
-        crate::wireguard::get_tcp_proxy_port() as JInt
-    }
-}
-
 // ============================================================================
 // WireGuard Direct HTTP JNI Functions
 // ============================================================================
@@ -1709,7 +1471,7 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgGetTcpProxyPort(
 ///   mtu: MTU size
 /// Returns: true on success, false on failure
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpSetConfig(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeHttpSetConfig(
     env: JNIEnv,
     _clazz: JClass,
     private_key: JByteArray,
@@ -1834,7 +1596,7 @@ pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpSe
 
 /// Clear WireGuard HTTP client configuration (WireGuardManager.nativeHttpClearConfig)
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpClearConfig(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeHttpClearConfig(
     _env: JNIEnv,
     _clazz: JClass,
 ) {
@@ -1844,7 +1606,7 @@ pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpCl
 
 /// Check if WireGuard HTTP client is configured (WireGuardManager.nativeHttpIsConfigured)
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpIsConfigured(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeHttpIsConfigured(
     _env: JNIEnv,
     _clazz: JClass,
 ) -> JBoolean {
@@ -1862,7 +1624,7 @@ pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpIs
 ///   path: Request path (e.g., "/serverinfo?uniqueid=...")
 /// Returns: Response body string on success, null on failure
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpGet(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeHttpGet(
     env: JNIEnv,
     _clazz: JClass,
     host: JString,
@@ -1910,7 +1672,7 @@ pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpGe
 /// Returns: status_code in high 16 bits, 0 in low 16 bits if success, -1 if failure
 /// Body can be retrieved separately
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpGetWithStatus(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeHttpGetWithStatus(
     env: JNIEnv,
     _clazz: JClass,
     host: JString,
@@ -1969,50 +1731,122 @@ unsafe fn jni_set_object_array_element(env: JNIEnv, array: JObject, index: i32, 
 }
 
 // ============================================================================
-// WireGuard TCP Proxy JNI Functions (for HTTPS through WireGuard)
+// WgSocket JNI Functions (for direct TCP socket access through WireGuard)
 // ============================================================================
 
-/// Create a TCP proxy for a target port using stored WG HTTP config
-/// (WireGuardManager.nativeHttpCreateTcpProxy)
-/// Returns: local port to connect to (>0) on success, -1 on failure
+/// Create a TCP connection through WireGuard VirtualStack (WgSocket.nativeConnect)
+/// Parameters:
+///   host: Target host IP in the tunnel (e.g., "10.0.0.1")
+///   port: Target port
+///   timeoutMs: Connection timeout in milliseconds
+/// Returns: Native handle (>0) on success, 0 on failure
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpCreateTcpProxy(
-    _env: JNIEnv,
+pub extern "C" fn Java_com_limelight_binding_wireguard_WgSocket_nativeConnect(
+    env: JNIEnv,
     _clazz: JClass,
-    target_port: JInt,
-) -> JInt {
-    match crate::wg_http::wg_http_create_tcp_proxy(target_port as u16) {
-        Ok(local_port) => {
-            info!("Created TCP proxy: local port {} -> target port {}", local_port, target_port);
-            local_port as JInt
+    host: JString,
+    port: JInt,
+    timeout_ms: JInt,
+) -> JLong {
+    let host_str = match jni_helpers::get_string(env, host) {
+        Some(s) => s,
+        None => {
+            error!("WgSocket.nativeConnect: invalid host string");
+            return 0;
         }
-        Err(e) => {
-            error!("Failed to create TCP proxy for port {}: {}", target_port, e);
-            -1
-        }
-    }
+    };
+
+    crate::wg_socket::wg_socket_connect(&host_str, port as u16, timeout_ms as u32) as JLong
 }
 
-/// Stop all TCP proxies (WireGuardManager.nativeHttpStopTcpProxies)
+/// Get the local port allocated for this connection (WgSocket.nativeGetLocalPort)
 #[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpStopTcpProxies(
+pub extern "C" fn Java_com_limelight_binding_wireguard_WgSocket_nativeGetLocalPort(
     _env: JNIEnv,
     _clazz: JClass,
+    handle: JLong,
+) -> JInt {
+    crate::wg_socket::wg_socket_get_local_port(handle as u64) as JInt
+}
+
+/// Receive data from the connection (WgSocket.nativeRecv)
+/// Parameters:
+///   handle: Native connection handle
+///   buffer: Buffer to receive into
+///   offset: Offset in buffer
+///   length: Maximum bytes to receive
+///   timeoutMs: Read timeout in milliseconds (0 = default timeout)
+/// Returns: Bytes received (>0), 0 on EOF, -1 on error, -2 on timeout
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_binding_wireguard_WgSocket_nativeRecv(
+    env: JNIEnv,
+    _clazz: JClass,
+    handle: JLong,
+    buffer: JByteArray,
+    offset: JInt,
+    length: JInt,
+    timeout_ms: JInt,
+) -> JInt {
+    if buffer.is_null() || length <= 0 {
+        error!("WgSocket.nativeRecv: invalid buffer");
+        return -1;
+    }
+
+    // Allocate temporary buffer for receive
+    let mut recv_buf = vec![0u8; length as usize];
+    
+    let result = crate::wg_socket::wg_socket_recv(handle as u64, &mut recv_buf, timeout_ms as u32);
+    
+    if result > 0 {
+        // Copy received data to Java buffer
+        let bytes_to_copy = result as usize;
+        jni_helpers::set_byte_array_region(env, buffer, offset, bytes_to_copy as i32, recv_buf.as_ptr() as *const i8);
+    }
+    
+    result
+}
+
+/// Send data through the connection (WgSocket.nativeSend)
+/// Parameters:
+///   handle: Native connection handle
+///   buffer: Data to send
+///   offset: Offset in buffer
+///   length: Number of bytes to send
+/// Returns: Bytes sent (>0) on success, negative on error
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_binding_wireguard_WgSocket_nativeSend(
+    env: JNIEnv,
+    _clazz: JClass,
+    handle: JLong,
+    buffer: JByteArray,
+    offset: JInt,
+    length: JInt,
+) -> JInt {
+    if buffer.is_null() || length <= 0 {
+        error!("WgSocket.nativeSend: invalid buffer");
+        return -1;
+    }
+
+    // Get data from Java buffer
+    let data = match jni_helpers::get_byte_array_region(env, buffer, offset, length) {
+        Some(d) => d,
+        None => {
+            error!("WgSocket.nativeSend: failed to get buffer data");
+            return -1;
+        }
+    };
+    
+    crate::wg_socket::wg_socket_send(handle as u64, &data)
+}
+
+/// Close the connection (WgSocket.nativeClose)
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_binding_wireguard_WgSocket_nativeClose(
+    _env: JNIEnv,
+    _clazz: JClass,
+    handle: JLong,
 ) {
-    crate::wg_http::wg_http_stop_tcp_proxies();
-    info!("All TCP proxies stopped");
+    crate::wg_socket::wg_socket_close(handle as u64);
 }
 
-/// Get the local port for a TCP proxy (WireGuardManager.nativeHttpGetProxyPort)
-/// Returns: local port if proxy exists, -1 otherwise
-#[no_mangle]
-pub extern "C" fn Java_com_limelight_binding_video_WireGuardManager_nativeHttpGetProxyPort(
-    _env: JNIEnv,
-    _clazz: JClass,
-    target_port: JInt,
-) -> JInt {
-    match crate::wg_http::wg_http_get_proxy_port(target_port as u16) {
-        Some(port) => port as JInt,
-        None => -1,
-    }
-}
+

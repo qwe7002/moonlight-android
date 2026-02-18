@@ -760,15 +760,17 @@ fn decode_chunked_body(body: &str) -> String {
 // Global HTTP client configuration
 // ============================================================================
 
-static GLOBAL_HTTP_CONFIG: Mutex<Option<WgHttpConfig>> = Mutex::new(None);
+pub static GLOBAL_HTTP_CONFIG: Mutex<Option<WgHttpConfig>> = Mutex::new(None);
 
 /// Set the WireGuard HTTP client configuration
 pub fn wg_http_set_config(config: WgHttpConfig) {
     *GLOBAL_HTTP_CONFIG.lock() = Some(config);
 }
 
-/// Clear the WireGuard HTTP client configuration
+/// Clear the WireGuard HTTP client configuration and stop the shared proxy
 pub fn wg_http_clear_config() {
+    // Stop the shared proxy first
+    stop_shared_proxy();
     *GLOBAL_HTTP_CONFIG.lock() = None;
 }
 
@@ -815,7 +817,7 @@ pub fn wg_http_get_string(host: &str, port: u16, path: &str) -> io::Result<Strin
 }
 
 // ============================================================================
-// TCP Proxy through WireGuard (for HTTPS and other TCP traffic)
+// Shared WireGuard TCP stack (for HTTP/HTTPS and socket connections)
 //
 // Uses a SINGLE shared WireGuard tunnel with a manual TCP/IP stack
 // (VirtualStack from tun_stack module). This avoids:
@@ -823,31 +825,22 @@ pub fn wg_http_get_string(host: &str, port: u16, path: &str) -> io::Result<Strin
 // 2. Multiple WG tunnels with the same key conflicting at the server
 // ============================================================================
 
-/// State for a single TCP proxy listener
-struct TcpProxyState {
-    local_port: u16,
-    running: Arc<AtomicBool>,
-}
-
-/// Global TCP proxy registry: target_port -> proxy state
-static TCP_PROXIES: Mutex<Option<HashMap<u16, TcpProxyState>>> = Mutex::new(None);
-
 /// Shared WireGuard tunnel and virtual TCP stack for all TCP proxy connections.
 /// Using a single tunnel avoids WG peer endpoint conflicts when multiple
 /// connections use the same key pair.
-struct SharedTcpProxy {
+pub struct SharedTcpProxy {
     /// boringtun tunnel instance (mutex for thread-safe access)
     tunnel: Mutex<Box<Tunn>>,
     /// UDP socket connected to WireGuard endpoint
     endpoint_socket: UdpSocket,
     /// Virtual TCP/IP stack
-    virtual_stack: VirtualStack,
+    pub virtual_stack: VirtualStack,
     /// Running flag for background threads
     running: Arc<AtomicBool>,
 }
 
 /// Global shared TCP proxy (single WG tunnel for all connections)
-static SHARED_TCP_PROXY: Mutex<Option<Arc<SharedTcpProxy>>> = Mutex::new(None);
+pub static SHARED_TCP_PROXY: Mutex<Option<Arc<SharedTcpProxy>>> = Mutex::new(None);
 
 impl SharedTcpProxy {
     /// Create a new shared proxy with WG tunnel and handshake.
@@ -911,7 +904,7 @@ impl SharedTcpProxy {
 
     /// Send queued outgoing IP packets through the WG tunnel.
     /// If the streaming tunnel is active, route through it instead to avoid two WG sessions.
-    fn flush_outgoing(&self) {
+    pub fn flush_outgoing(&self) {
         let packets = self.virtual_stack.take_outgoing_packets();
         if packets.is_empty() {
             return;
@@ -1104,7 +1097,7 @@ impl SharedTcpProxy {
 /// Get or create the shared WG tunnel for TCP proxying.
 /// When streaming tunnel is active, the shared proxy routes through it instead of
 /// creating its own WG session.
-fn get_or_create_shared_proxy(config: &WgHttpConfig) -> io::Result<Arc<SharedTcpProxy>> {
+pub fn get_or_create_shared_proxy(config: &WgHttpConfig) -> io::Result<Arc<SharedTcpProxy>> {
     let mut shared = SHARED_TCP_PROXY.lock();
     if let Some(ref proxy) = *shared {
         if proxy.running.load(Ordering::SeqCst) {
@@ -1118,321 +1111,14 @@ fn get_or_create_shared_proxy(config: &WgHttpConfig) -> io::Result<Arc<SharedTcp
     Ok(proxy)
 }
 
-/// Create a TCP proxy for a specific target port through WireGuard.
-/// Uses the stored global HTTP config. Returns the local port to connect to.
-pub fn wg_http_create_tcp_proxy(target_port: u16) -> io::Result<u16> {
-    info!(">>> wg_http_create_tcp_proxy CALLED: target_port={}", target_port);
-    
-    let config = GLOBAL_HTTP_CONFIG
-        .lock()
-        .clone()
-        .ok_or_else(|| {
-            error!("wg_http_create_tcp_proxy: GLOBAL_HTTP_CONFIG is None!");
-            io::Error::new(io::ErrorKind::NotConnected, "WG HTTP not configured")
-        })?;
-    
-    info!("wg_http_create_tcp_proxy: config loaded, server_ip={}", config.server_ip);
-
-    // Check if proxy already exists for this target port
-    {
-        let proxies = TCP_PROXIES.lock();
-        if let Some(ref map) = *proxies {
-            if let Some(state) = map.get(&target_port) {
-                if state.running.load(Ordering::SeqCst) {
-                    info!("TCP proxy already running for port {} on local port {}", target_port, state.local_port);
-                    return Ok(state.local_port);
-                }
-            }
-        }
-    }
-
-    // Create local TCP listener - try to bind to the same port for transparent proxying
-    let listener = match TcpListener::bind(format!("127.0.0.1:{}", target_port)) {
-        Ok(l) => {
-            info!("TCP proxy bound to same port 127.0.0.1:{} (transparent proxy)", target_port);
-            l
-        }
-        Err(e) => {
-            warn!("Could not bind to port {}, using random port: {}", target_port, e);
-            TcpListener::bind("127.0.0.1:0")?
-        }
-    };
-    let local_port = listener.local_addr()?.port();
-    let running = Arc::new(AtomicBool::new(true));
-    let running_clone = running.clone();
-
-    info!("Creating TCP proxy: 127.0.0.1:{} -> {}:{}", local_port, config.server_ip, target_port);
-
-    // Store proxy state
-    {
-        let mut proxies = TCP_PROXIES.lock();
-        if proxies.is_none() {
-            info!("Initializing TCP_PROXIES HashMap");
-            *proxies = Some(HashMap::new());
-        }
-        proxies.as_mut().unwrap().insert(target_port, TcpProxyState {
-            local_port,
-            running: running.clone(),
-        });
-        let proxy_count = proxies.as_ref().map(|m| m.len()).unwrap_or(0);
-        info!("TCP proxy stored: target_port={} -> local_port={}, total proxies={}", 
-              target_port, local_port, proxy_count);
-    }
-
-    // Spawn listener thread
-    let local_port_for_log = local_port;
-    thread::Builder::new()
-        .name(format!("wg-http-tcp-proxy-{}", target_port))
-        .spawn(move || {
-            info!("TCP proxy listener thread started for port {}, listening on 127.0.0.1:{}", 
-                  target_port, local_port_for_log);
-            listener.set_nonblocking(true).ok();
-
-            while running_clone.load(Ordering::SeqCst) {
-                match listener.accept() {
-                    Ok((client, addr)) => {
-                        info!("TCP proxy for port {}: new connection from {}", target_port, addr);
-                        let cfg = config.clone();
-                        let tp = target_port;
-                        let run = running_clone.clone();
-
-                        thread::Builder::new()
-                            .name(format!("wg-tcp-conn-{}-{}", tp, addr.port()))
-                            .spawn(move || {
-                                if let Err(e) = handle_tcp_proxy_connection(client, cfg, tp, &run) {
-                                    warn!("TCP proxy connection error for port {}: {}", tp, e);
-                                }
-                            })
-                            .ok();
-                    }
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(e) => {
-                        error!("TCP proxy accept error: {}", e);
-                        thread::sleep(Duration::from_millis(100));
-                    }
-                }
-            }
-
-            info!("TCP proxy for port {} stopped", target_port);
-        })?;
-
-    Ok(local_port)
-}
-
-/// Stop all TCP proxies and the shared WG tunnel
-pub fn wg_http_stop_tcp_proxies() {
-    // Stop all listener threads
-    let mut proxies = TCP_PROXIES.lock();
-    if let Some(map) = proxies.take() {
-        for (port, state) in map {
-            state.running.store(false, Ordering::SeqCst);
-            info!("Stopping TCP proxy for port {}", port);
-        }
-    }
-
-    // Stop the shared WG tunnel
-    wg_http_stop_shared_tunnel();
-}
-
-/// Stop just the shared WG tunnel (called when streaming tunnel starts to avoid conflicts).
-/// The TCP proxy listeners remain running but will fail to create new connections.
-pub fn wg_http_stop_shared_tunnel() {
+/// Stop the shared WireGuard tunnel.
+/// Called when WireGuard is disabled or when the streaming tunnel starts.
+pub fn stop_shared_proxy() {
     let mut shared = SHARED_TCP_PROXY.lock();
     if let Some(ref proxy) = *shared {
         proxy.stop();
-        info!("Stopped shared WG TCP proxy tunnel (streaming tunnel may be starting)");
+        info!("Stopped shared WG TCP proxy tunnel");
     }
     *shared = None;
-}
-
-/// Get the local port for a TCP proxy targeting a specific port
-pub fn wg_http_get_proxy_port(target_port: u16) -> Option<u16> {
-    let proxies = TCP_PROXIES.lock();
-    let result = proxies.as_ref().and_then(|map| {
-        map.get(&target_port).and_then(|state| {
-            if state.running.load(Ordering::SeqCst) {
-                Some(state.local_port)
-            } else {
-                None
-            }
-        })
-    });
-    info!("wg_http_get_proxy_port({}) = {:?}, proxies_exists={}", 
-          target_port, result, proxies.is_some());
-    result
-}
-
-/// Check if any TCP proxy is running
-pub fn wg_http_is_any_tcp_proxy_running() -> bool {
-    let proxies = TCP_PROXIES.lock();
-    proxies.as_ref().map_or(false, |map| {
-        map.values().any(|state| state.running.load(Ordering::SeqCst))
-    })
-}
-
-/// Get the first running TCP proxy's local port (for backwards compatibility)
-pub fn wg_http_get_first_proxy_port() -> u16 {
-    let proxies = TCP_PROXIES.lock();
-    proxies.as_ref().and_then(|map| {
-        map.values()
-            .find(|state| state.running.load(Ordering::SeqCst))
-            .map(|state| state.local_port)
-    }).unwrap_or(0)
-}
-
-/// Handle a single TCP connection through the shared WireGuard tunnel.
-/// Uses the VirtualStack (manual TCP/IP stack) instead of smoltcp.
-fn handle_tcp_proxy_connection(
-    mut client: TcpStream,
-    config: WgHttpConfig,
-    target_port: u16,
-    running: &AtomicBool,
-) -> io::Result<()> {
-    info!("TCP proxy: starting connection to {}:{}", config.server_ip, target_port);
-    
-    client.set_nonblocking(true)?;
-    client.set_nodelay(true)?;
-
-    // Get the shared proxy (creates WG tunnel + virtual stack if needed)
-    let proxy = get_or_create_shared_proxy(&config)?;
-    info!("TCP proxy: shared proxy obtained, initiating TCP connect");
-
-    // Initiate TCP connection through virtual stack
-    let (conn_id, rx) = proxy.virtual_stack.tcp_connect(config.server_ip, target_port);
-
-    // Flush the SYN packet immediately
-    proxy.flush_outgoing();
-
-    // Wait for TCP connection establishment
-    let connect_start = Instant::now();
-    let connect_timeout = Duration::from_secs(CONNECTION_TIMEOUT_SECS);
-
-    while !proxy.virtual_stack.is_tcp_established(&conn_id) {
-        if connect_start.elapsed() > connect_timeout {
-            let state = proxy.virtual_stack.get_tcp_state(&conn_id);
-            warn!(
-                "WG TCP proxy: connection timeout after {:?}, state: {:?}",
-                connect_start.elapsed(),
-                state
-            );
-            proxy.virtual_stack.remove_tcp_connection(&conn_id);
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "Connection timeout"));
-        }
-
-        // Check for connection reset
-        match proxy.virtual_stack.get_tcp_state(&conn_id) {
-            Some(VirtualTcpState::Closed) | None => {
-                warn!("TCP proxy: connection to {}:{} refused/reset", config.server_ip, target_port);
-                proxy.virtual_stack.remove_tcp_connection(&conn_id);
-                return Err(io::Error::new(
-                    io::ErrorKind::ConnectionRefused,
-                    "Connection refused",
-                ));
-            }
-            _ => {}
-        }
-
-        thread::sleep(Duration::from_millis(1));
-    }
-
-    info!("TCP proxy connection established to {}:{}", config.server_ip, target_port);
-
-    // Bidirectional relay loop
-    let mut client_buf = vec![0u8; 32768];
-    let relay_start = Instant::now();
-    let relay_timeout = Duration::from_secs(300); // Overall session timeout (5 min for pairing)
-    let mut last_activity = Instant::now();
-    let idle_timeout = Duration::from_secs(180); // Idle timeout (3 min for slow pairing operations)
-
-    while running.load(Ordering::SeqCst) {
-        if relay_start.elapsed() > relay_timeout {
-            debug!("TCP proxy: session timeout");
-            break;
-        }
-        if last_activity.elapsed() > idle_timeout {
-            debug!("TCP proxy: idle timeout");
-            break;
-        }
-
-        let mut did_work = false;
-
-        // Client -> Remote: read from local client, send through virtual stack
-        match client.read(&mut client_buf) {
-            Ok(0) => {
-                debug!("TCP proxy: client closed connection");
-                break;
-            }
-            Ok(n) => {
-                if let Err(e) = proxy.virtual_stack.tcp_send(&conn_id, &client_buf[..n]) {
-                    debug!("TCP proxy: virtual stack send failed: {}", e);
-                    break;
-                }
-                proxy.flush_outgoing();
-                last_activity = Instant::now();
-                did_work = true;
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
-            Err(e) => {
-                debug!("TCP proxy: client read error: {}", e);
-                break;
-            }
-        }
-
-        // Remote -> Client: read from virtual stack channel, send to local client
-        match rx.try_recv() {
-            Ok(data) => {
-                if let Err(e) = client.write_all(&data) {
-                    debug!("TCP proxy: client write error: {}", e);
-                    break;
-                }
-                last_activity = Instant::now();
-                did_work = true;
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                debug!("TCP proxy: virtual stack channel disconnected");
-                break;
-            }
-        }
-
-        // Check connection state
-        match proxy.virtual_stack.get_tcp_state(&conn_id) {
-            Some(VirtualTcpState::Closed) | Some(VirtualTcpState::TimeWait) | None => {
-                debug!("TCP proxy: connection closed by remote");
-                break;
-            }
-            Some(VirtualTcpState::CloseWait) => {
-                // Remote sent FIN - drain remaining data then close
-                loop {
-                    match rx.try_recv() {
-                        Ok(data) => {
-                            client.write_all(&data).ok();
-                        }
-                        _ => break,
-                    }
-                }
-                break;
-            }
-            _ => {}
-        }
-
-        if !did_work {
-            thread::sleep(Duration::from_micros(100));
-        }
-    }
-
-    // Graceful close
-    proxy.virtual_stack.tcp_close(&conn_id).ok();
-    proxy.flush_outgoing();
-
-    // Give time for FIN to be sent and processed
-    thread::sleep(Duration::from_millis(50));
-    proxy.flush_outgoing();
-
-    proxy.virtual_stack.remove_tcp_connection(&conn_id);
-
-    Ok(())
 }
 

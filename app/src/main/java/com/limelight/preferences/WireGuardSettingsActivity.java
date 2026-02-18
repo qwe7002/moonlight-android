@@ -24,7 +24,7 @@ import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 import com.limelight.R;
-import com.limelight.binding.video.WireGuardManager;
+import com.limelight.binding.wireguard.WireGuardManager;
 import com.limelight.utils.UiHelper;
 
 import java.util.concurrent.ExecutorService;
@@ -46,7 +46,6 @@ public class WireGuardSettingsActivity extends AppCompatActivity {
     private static final String PREF_PRESHARED_KEY = "wg_preshared_key";
     private static final String PREF_MTU = "wg_mtu";
     private static final String PREF_KEEPALIVE = "wg_keepalive";
-    private static final String PREF_SERVER_ADDRESS = "wg_server_address";
 
     // UI elements
     private SwitchMaterial switchEnabled;
@@ -56,7 +55,6 @@ public class WireGuardSettingsActivity extends AppCompatActivity {
     private TextInputEditText editPrivateKey;
     private TextInputEditText editPublicKey;
     private TextInputEditText editTunnelAddress;
-    private TextInputEditText editServerAddress;
     private TextInputEditText editPeerPublicKey;
     private TextInputEditText editPeerEndpoint;
     private TextInputEditText editPresharedKey;
@@ -113,7 +111,6 @@ public class WireGuardSettingsActivity extends AppCompatActivity {
         editPrivateKey = findViewById(R.id.edit_private_key);
         editPublicKey = findViewById(R.id.edit_public_key);
         editTunnelAddress = findViewById(R.id.edit_tunnel_address);
-        editServerAddress = findViewById(R.id.edit_server_address);
         editPeerPublicKey = findViewById(R.id.edit_peer_public_key);
         editPeerEndpoint = findViewById(R.id.edit_peer_endpoint);
         editPresharedKey = findViewById(R.id.edit_preshared_key);
@@ -130,7 +127,6 @@ public class WireGuardSettingsActivity extends AppCompatActivity {
         switchEnabled.setChecked(prefs.getBoolean(PREF_ENABLED, false));
         editPrivateKey.setText(prefs.getString(PREF_PRIVATE_KEY, ""));
         editTunnelAddress.setText(prefs.getString(PREF_TUNNEL_ADDRESS, "10.0.0.2"));
-        editServerAddress.setText(prefs.getString(PREF_SERVER_ADDRESS, "10.0.0.1"));
         editPeerPublicKey.setText(prefs.getString(PREF_PEER_PUBLIC_KEY, ""));
         editPeerEndpoint.setText(prefs.getString(PREF_PEER_ENDPOINT, ""));
         editPresharedKey.setText(prefs.getString(PREF_PRESHARED_KEY, ""));
@@ -293,7 +289,6 @@ public class WireGuardSettingsActivity extends AppCompatActivity {
     private void saveConfig() {
         String privateKey = editPrivateKey.getText() != null ? editPrivateKey.getText().toString().trim() : "";
         String tunnelAddress = editTunnelAddress.getText() != null ? editTunnelAddress.getText().toString().trim() : "";
-        String serverAddress = editServerAddress.getText() != null ? editServerAddress.getText().toString().trim() : "";
         String peerPublicKey = editPeerPublicKey.getText() != null ? editPeerPublicKey.getText().toString().trim() : "";
         String peerEndpoint = editPeerEndpoint.getText() != null ? editPeerEndpoint.getText().toString().trim() : "";
         String presharedKey = editPresharedKey.getText() != null ? editPresharedKey.getText().toString().trim() : "";
@@ -316,7 +311,6 @@ public class WireGuardSettingsActivity extends AppCompatActivity {
             .putBoolean(PREF_ENABLED, switchEnabled.isChecked())
             .putString(PREF_PRIVATE_KEY, privateKey)
             .putString(PREF_TUNNEL_ADDRESS, tunnelAddress)
-            .putString(PREF_SERVER_ADDRESS, serverAddress)
             .putString(PREF_PEER_PUBLIC_KEY, peerPublicKey)
             .putString(PREF_PEER_ENDPOINT, peerEndpoint)
             .putString(PREF_PRESHARED_KEY, presharedKey)
@@ -594,14 +588,6 @@ public class WireGuardSettingsActivity extends AppCompatActivity {
     public static boolean isEnabled(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         return prefs.getBoolean(PREF_ENABLED, false);
-    }
-
-    /**
-     * Get the configured WireGuard server address (the gaming server's IP in the tunnel)
-     */
-    public static String getServerAddress(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        return prefs.getString(PREF_SERVER_ADDRESS, "");
     }
 }
 

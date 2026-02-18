@@ -12,7 +12,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import com.limelight.binding.PlatformBinding;
-import com.limelight.binding.video.WireGuardManager;
+import com.limelight.binding.wireguard.WireGuardManager;
 import com.limelight.discovery.DiscoveryService;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvApp;
@@ -33,7 +33,6 @@ import android.content.ServiceConnection;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.os.Binder;
-import android.os.Build;
 import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Log;
@@ -583,47 +582,12 @@ public class ComputerManagerService extends Service {
 
     /**
      * Configure WireGuard HTTP JNI for direct HTTP requests through the tunnel.
-     * This is needed because the userspace WireGuard tunnel is invisible to OkHttp,
-     * so we must route HTTP requests through the JNI WireGuard HTTP client.
+     * Note: This requires a specific target address, so it's now a no-op.
+     * WireGuard HTTP is configured per-connection in Game.java and PairingService.
      */
     private void configureWireGuardHttp() {
-        if (!WireGuardSettingsActivity.isEnabled(this)) {
-            return;
-        }
-
-        // Don't reconfigure if already active (e.g. Game.java already set it up)
-        if (NvHTTP.isDirectWgHttpEnabled()) {
-            Log.i(TAG, "WireGuard HTTP JNI already active, skipping configuration");
-            return;
-        }
-
-        PreferenceConfiguration prefConfig = PreferenceConfiguration.readPreferences(this);
-        if (!prefConfig.wgEnabled || prefConfig.wgServerAddress == null || prefConfig.wgServerAddress.isEmpty()
-                || prefConfig.wgPrivateKey == null || prefConfig.wgPrivateKey.isEmpty()
-                || prefConfig.wgPeerPublicKey == null || prefConfig.wgPeerPublicKey.isEmpty()
-                || prefConfig.wgEndpoint == null || prefConfig.wgEndpoint.isEmpty()) {
-            Log.w(TAG, "WireGuard enabled but configuration incomplete, skipping HTTP JNI setup");
-            return;
-        }
-
-        try {
-            WireGuardManager.Config wgConfig = new WireGuardManager.Config()
-                    .setPrivateKeyBase64(prefConfig.wgPrivateKey)
-                    .setPeerPublicKeyBase64(prefConfig.wgPeerPublicKey)
-                    .setPresharedKeyBase64(prefConfig.wgPresharedKey.isEmpty() ? null : prefConfig.wgPresharedKey)
-                    .setEndpoint(prefConfig.wgEndpoint)
-                    .setTunnelAddress(prefConfig.wgTunnelAddress);
-
-            if (WireGuardManager.configureHttp(wgConfig, prefConfig.wgServerAddress)) {
-                NvHTTP.setUseDirectWgHttp(true);
-                wgHttpStartedByService = true;
-                Log.i(TAG, "WireGuard HTTP JNI configured for polling (HTTP via JNI, HTTPS via TCP proxy)");
-            } else {
-                Log.e(TAG, "Failed to configure WireGuard HTTP JNI for polling");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to setup WireGuard HTTP JNI for polling", e);
-        }
+        // WireGuard HTTP configuration removed - target address is now dynamic
+        // and configured per-connection in Game.java and PairingService
     }
 
     /**
@@ -633,31 +597,18 @@ public class ComputerManagerService extends Service {
         if (wgHttpStartedByService) {
             WireGuardManager.clearHttpConfig();
             NvHTTP.setUseDirectWgHttp(false);
-            WireGuardManager.stopTcpProxies();
             wgHttpStartedByService = false;
             Log.i(TAG, "WireGuard HTTP JNI torn down");
         }
     }
 
+    /**
+     * Get WireGuard server address for polling.
+     * Note: Removed - WireGuard target address is now dynamic per-connection.
+     */
     private ComputerDetails.AddressTuple getWireGuardServerAddress() {
-        // Read the WireGuard server address from preferences if WireGuard is enabled
-        // and the tunnel is active
-        if (!WireGuardManager.isTunnelActive()) {
-            return null;
-        }
-
-        if (!WireGuardSettingsActivity.isEnabled(this)) {
-            return null;
-        }
-
-        PreferenceConfiguration prefConfig = PreferenceConfiguration.readPreferences(this);
-        if (prefConfig.wgServerAddress != null && !prefConfig.wgServerAddress.isEmpty()) {
-            try {
-                return new ComputerDetails.AddressTuple(prefConfig.wgServerAddress, NvHTTP.DEFAULT_HTTP_PORT);
-            } catch (IllegalArgumentException e) {
-                Log.w(TAG, "Invalid WireGuard server address: " + prefConfig.wgServerAddress, e);
-            }
-        }
+        // WireGuard server address is now dynamic per-connection
+        // No static address to return for polling
         return null;
     }
 

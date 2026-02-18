@@ -67,14 +67,6 @@ pub struct WgUdpProxy {
     pub target_addr: SocketAddr,
 }
 
-/// A TCP proxy socket that tunnels traffic through WireGuard.
-pub struct WgTcpProxy {
-    /// The local port that moonlight-common-c will connect to
-    pub local_port: u16,
-    /// The peer address that this proxy forwards to through the tunnel
-    pub target_addr: SocketAddr,
-}
-
 /// The WireGuard tunnel manager
 pub struct WireGuardTunnel {
     config: WireGuardConfig,
@@ -826,301 +818,6 @@ impl Device for WgDevice {
     }
 }
 
-/// State for TCP proxy global management
-static TCP_PROXY_RUNNING: AtomicBool = AtomicBool::new(false);
-static TCP_PROXY_PORT: AtomicU16 = AtomicU16::new(0);
-static NEXT_EPHEMERAL_PORT: AtomicU16 = AtomicU16::new(10000);
-
-/// Create a TCP proxy that listens locally and relays to the target through WireGuard.
-/// Each incoming connection gets its own WireGuard tunnel instance for isolation.
-/// If prefer_local_port is Some, tries to bind to that port first (for transparent proxying).
-/// Returns the local port to connect to.
-pub fn create_tcp_proxy(
-    config: WireGuardConfig,
-    target_addr: SocketAddr,
-    prefer_local_port: Option<u16>,
-) -> io::Result<u16> {
-    // Create local TCP listener - try preferred port first, fall back to random
-    let listener = if let Some(port) = prefer_local_port {
-        match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-            Ok(l) => l,
-            Err(e) => {
-                warn!("Could not bind TCP proxy to port {}, using random port: {}", port, e);
-                TcpListener::bind("127.0.0.1:0")?
-            }
-        }
-    } else {
-        TcpListener::bind("127.0.0.1:0")?
-    };
-    let local_port = listener.local_addr()?.port();
-    
-    TCP_PROXY_RUNNING.store(true, Ordering::SeqCst);
-    TCP_PROXY_PORT.store(local_port, Ordering::SeqCst);
-    
-    info!("TCP proxy started on port {} -> {}", local_port, target_addr);
-    
-    thread::Builder::new()
-        .name("wg-tcp-proxy".into())
-        .spawn(move || {
-            listener.set_nonblocking(true).ok();
-            
-            while TCP_PROXY_RUNNING.load(Ordering::SeqCst) {
-                match listener.accept() {
-                    Ok((client, addr)) => {
-                        debug!("TCP proxy: new connection from {}", addr);
-                        let cfg = config.clone();
-                        let target = target_addr;
-                        
-                        thread::Builder::new()
-                            .name(format!("wg-tcp-conn-{}", addr.port()))
-                            .spawn(move || {
-                                if let Err(e) = handle_tcp_connection(client, cfg, target) {
-                                    debug!("TCP connection error: {}", e);
-                                }
-                            })
-                            .ok();
-                    }
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(e) => {
-                        error!("TCP proxy accept error: {}", e);
-                        thread::sleep(Duration::from_millis(100));
-                    }
-                }
-            }
-            
-            info!("TCP proxy stopped");
-        })?;
-    
-    Ok(local_port)
-}
-
-/// Stop the TCP proxy
-pub fn stop_tcp_proxy() {
-    TCP_PROXY_RUNNING.store(false, Ordering::SeqCst);
-    TCP_PROXY_PORT.store(0, Ordering::SeqCst);
-}
-
-/// Check if TCP proxy is running
-pub fn is_tcp_proxy_running() -> bool {
-    TCP_PROXY_RUNNING.load(Ordering::SeqCst)
-}
-
-/// Get TCP proxy port
-pub fn get_tcp_proxy_port() -> u16 {
-    TCP_PROXY_PORT.load(Ordering::SeqCst)
-}
-
-/// Handle a single TCP connection through WireGuard
-fn handle_tcp_connection(
-    mut client: TcpStream,
-    config: WireGuardConfig,
-    target_addr: SocketAddr,
-) -> io::Result<()> {
-    client.set_nonblocking(true)?;
-    client.set_nodelay(true)?;
-    
-    // Create WireGuard tunnel for this connection
-    let private_key = StaticSecret::from(config.private_key);
-    let peer_public_key = PublicKey::from(config.peer_public_key);
-    
-    let mut tunnel = Tunn::new(
-        private_key,
-        peer_public_key,
-        config.preshared_key,
-        Some(config.keepalive_secs),
-        0,
-        None,
-    ).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    
-    // Create UDP socket to WireGuard endpoint
-    let endpoint_socket = UdpSocket::bind("0.0.0.0:0")?;
-    endpoint_socket.connect(config.endpoint)?;
-    endpoint_socket.set_nonblocking(true)?;
-    
-    // Perform WireGuard handshake
-    let mut handshake_buf = vec![0u8; WG_BUFFER_SIZE];
-    match tunnel.format_handshake_initiation(&mut handshake_buf, false) {
-        TunnResult::WriteToNetwork(data) => {
-            endpoint_socket.send(data)?;
-        }
-        _ => return Err(io::Error::new(io::ErrorKind::Other, "Handshake init failed")),
-    }
-    
-    // Wait for handshake response
-    endpoint_socket.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let mut recv_buf = vec![0u8; WG_BUFFER_SIZE];
-    let mut dec_buf = vec![0u8; WG_BUFFER_SIZE];
-    
-    let n = endpoint_socket.recv(&mut recv_buf)?;
-    match tunnel.decapsulate(None, &recv_buf[..n], &mut dec_buf) {
-        TunnResult::WriteToNetwork(data) => {
-            endpoint_socket.send(data)?;
-        }
-        TunnResult::Done => {}
-        _ => {}
-    }
-    
-    // Set socket back to non-blocking
-    endpoint_socket.set_read_timeout(Some(Duration::from_millis(1)))?;
-    
-    // Create smoltcp interface
-    let mtu = config.mtu as usize;
-    let mut device = WgDevice::new(mtu);
-    
-    let local_ip = match config.tunnel_address {
-        IpAddr::V4(ip) => ip,
-        _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "IPv6 tunnel address not supported")),
-    };
-    let iface_config = IfaceConfig::new(smoltcp::wire::HardwareAddress::Ip);
-    let mut iface = Interface::new(iface_config, &mut device, SmolInstant::from_millis(0));
-    iface.update_ip_addrs(|addrs| {
-        addrs.push(IpCidr::new(IpAddress::v4(
-            local_ip.octets()[0],
-            local_ip.octets()[1], 
-            local_ip.octets()[2],
-            local_ip.octets()[3],
-        ), 24)).ok();
-    });
-    
-    // Create smoltcp TCP socket
-    let tcp_rx_buffer = SocketBuffer::new(vec![0u8; TCP_RX_BUFFER_SIZE]);
-    let tcp_tx_buffer = SocketBuffer::new(vec![0u8; TCP_TX_BUFFER_SIZE]);
-    let mut tcp_socket = SmolTcpSocket::new(tcp_rx_buffer, tcp_tx_buffer);
-    
-    // Get ephemeral port for local side
-    let local_port = NEXT_EPHEMERAL_PORT.fetch_add(1, Ordering::SeqCst);
-    if local_port > 60000 {
-        NEXT_EPHEMERAL_PORT.store(10000, Ordering::SeqCst);
-    }
-    
-    // Connect to target
-    let target_ip = match target_addr.ip() {
-        IpAddr::V4(ip) => ip,
-        _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "IPv6 not supported")),
-    };
-    
-    let remote_endpoint = IpEndpoint::new(
-        IpAddress::v4(target_ip.octets()[0], target_ip.octets()[1], target_ip.octets()[2], target_ip.octets()[3]),
-        target_addr.port(),
-    );
-    let local_endpoint = IpEndpoint::new(
-        IpAddress::v4(local_ip.octets()[0], local_ip.octets()[1], local_ip.octets()[2], local_ip.octets()[3]),
-        local_port,
-    );
-    
-    if let Err(e) = tcp_socket.connect(iface.context(), remote_endpoint, local_endpoint) {
-        return Err(io::Error::new(io::ErrorKind::Other, format!("TCP connect failed: {:?}", e)));
-    }
-    
-    let mut sockets = SocketSet::new(vec![]);
-    let tcp_handle = sockets.add(tcp_socket);
-    
-    // Buffers for zerocopy relay
-    let mut client_buf = vec![0u8; 32768];
-    let mut remote_buf = vec![0u8; 32768];
-    
-    let start = Instant::now();
-    let timeout = Duration::from_secs(30);
-    
-    // Main relay loop
-    while start.elapsed() < timeout {
-        let timestamp = SmolInstant::from_millis(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as i64
-        );
-        
-        // Poll smoltcp interface
-        iface.poll(timestamp, &mut device, &mut sockets);
-        
-        // Send outgoing IP packets through WireGuard
-        for packet in device.take_outgoing() {
-            let mut enc_buf = vec![0u8; WG_BUFFER_SIZE];
-            match tunnel.encapsulate(&packet, &mut enc_buf) {
-                TunnResult::WriteToNetwork(data) => {
-                    endpoint_socket.send(data).ok();
-                }
-                _ => {}
-            }
-        }
-        
-        // Receive from WireGuard endpoint
-        match endpoint_socket.recv(&mut recv_buf) {
-            Ok(n) if n > 0 => {
-                match tunnel.decapsulate(None, &recv_buf[..n], &mut dec_buf) {
-                    TunnResult::WriteToNetwork(data) => {
-                        endpoint_socket.send(data).ok();
-                    }
-                    TunnResult::WriteToTunnelV4(data, _) => {
-                        device.inject_packet(data.to_vec());
-                    }
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-        
-        // Get TCP socket
-        let socket = sockets.get_mut::<SmolTcpSocket>(tcp_handle);
-        
-        // Check connection state
-        match socket.state() {
-            TcpState::Closed | TcpState::TimeWait => {
-                debug!("TCP connection closed");
-                break;
-            }
-            TcpState::Established => {
-                // Read from client, send to remote
-                match client.read(&mut client_buf) {
-                    Ok(0) => break, // Client closed
-                    Ok(n) => {
-                        if socket.can_send() {
-                            socket.send_slice(&client_buf[..n]).ok();
-                        }
-                    }
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                    Err(_) => break,
-                }
-                
-                // Read from remote, send to client
-                if socket.can_recv() {
-                    match socket.recv_slice(&mut remote_buf) {
-                        Ok(n) if n > 0 => {
-                            if client.write_all(&remote_buf[..n]).is_err() {
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {
-                // Connection not yet established, just process
-            }
-        }
-        
-        // Update timers
-        let mut timer_buf = vec![0u8; WG_BUFFER_SIZE];
-        match tunnel.update_timers(&mut timer_buf) {
-            TunnResult::WriteToNetwork(data) => {
-                endpoint_socket.send(data).ok();
-            }
-            _ => {}
-        }
-        
-        thread::sleep(Duration::from_micros(100));
-    }
-    
-    // Clean close
-    let socket = sockets.get_mut::<SmolTcpSocket>(tcp_handle);
-    socket.close();
-    
-    Ok(())
-}
-
 // ============================================================================
 // Global WireGuard tunnel instance
 // ============================================================================
@@ -1172,16 +869,6 @@ pub fn wg_is_tunnel_active() -> bool {
     global.as_ref().map_or(false, |t| t.is_ready())
 }
 
-/// Create a UDP proxy through the WireGuard tunnel.
-/// Returns the local socket address to connect to.
-pub fn wg_create_udp_proxy(target_addr: SocketAddr) -> io::Result<SocketAddr> {
-    let global = GLOBAL_TUNNEL.lock();
-    match global.as_ref() {
-        Some(tunnel) => tunnel.create_udp_proxy(target_addr),
-        None => Err(io::Error::new(io::ErrorKind::NotConnected, "WireGuard tunnel not active")),
-    }
-}
-
 /// Create streaming UDP proxies for all moonlight ports.
 /// This sets up proxies on the same ports locally (47998, 47999, 48000) forwarding to target.
 /// Also enables zero-copy routing in platform_sockets for direct WG encapsulation.
@@ -1222,6 +909,28 @@ pub fn wg_send_ip_packet(packet: &[u8]) -> io::Result<()> {
                 TunnResult::Err(e) => Err(io::Error::new(io::ErrorKind::Other, format!("Encapsulate error: {:?}", e))),
                 _ => Ok(()),
             }
+        }
+        None => Err(io::Error::new(io::ErrorKind::NotConnected, "WireGuard tunnel not active")),
+    }
+}
+
+/// Enable direct WireGuard routing without creating UDP proxies.
+/// This enables zero-copy routing: socket sendto calls targeting the WG server IP
+/// are intercepted and encapsulated directly through the WG tunnel.
+///
+/// Use this instead of wg_create_streaming_proxies when you want to use
+/// the actual WG server IP instead of 127.0.0.1 proxies.
+pub fn wg_enable_direct_routing(server_ip: Ipv4Addr) -> io::Result<()> {
+    let global = GLOBAL_TUNNEL.lock();
+    match global.as_ref() {
+        Some(tunnel) => {
+            let tunnel_ip = match tunnel.config.tunnel_address {
+                IpAddr::V4(ip) => ip,
+                _ => Ipv4Addr::new(10, 0, 0, 2), // fallback
+            };
+            crate::platform_sockets::enable_wg_routing(tunnel_ip, server_ip);
+            info!("Direct WireGuard routing enabled: tunnel_ip={}, server_ip={}", tunnel_ip, server_ip);
+            Ok(())
         }
         None => Err(io::Error::new(io::ErrorKind::NotConnected, "WireGuard tunnel not active")),
     }

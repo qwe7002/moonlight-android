@@ -74,7 +74,6 @@ public class PreferenceConfiguration {
     private static final String WG_PRESHARED_KEY_PREF_STRING = "edit_wg_preshared_key";
     private static final String WG_ENDPOINT_PREF_STRING = "edit_wg_endpoint";
     private static final String WG_TUNNEL_ADDRESS_PREF_STRING = "edit_wg_tunnel_address";
-    private static final String WG_SERVER_ADDRESS_PREF_STRING = "edit_wg_server_address";
 
     static final String DEFAULT_RESOLUTION = "1920x1080";
     static final String DEFAULT_FPS = "60";
@@ -168,7 +167,6 @@ public class PreferenceConfiguration {
     public String wgPresharedKey;
     public String wgEndpoint;
     public String wgTunnelAddress;
-    public String wgServerAddress;
 
     public static boolean isNativeResolution(int width, int height) {
         // It's not a native resolution if it matches an existing resolution option
@@ -814,7 +812,6 @@ public class PreferenceConfiguration {
         config.wgPresharedKey = wgPrefs.getString("wg_preshared_key", "");
         config.wgEndpoint = wgPrefs.getString("wg_peer_endpoint", "");
         config.wgTunnelAddress = wgPrefs.getString("wg_tunnel_address", "");
-        config.wgServerAddress = wgPrefs.getString("wg_server_address", "");
 
         return config;
     }

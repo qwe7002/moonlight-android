@@ -15,7 +15,7 @@ import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
 import com.limelight.binding.video.StreamingStats;
-import com.limelight.binding.video.WireGuardManager;
+import com.limelight.binding.wireguard.WireGuardManager;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
 import com.limelight.nvstream.StreamConfiguration;
@@ -572,8 +572,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 .build();
 
         // Setup WireGuard proxies if enabled
-        if (prefConfig.wgEnabled && prefConfig.wgServerAddress != null && !prefConfig.wgServerAddress.isEmpty()) {
-            Log.i(TAG, "WireGuard enabled, setting up proxies");
+        // Server IP is derived from the target host, not a separate setting
+        if (prefConfig.wgEnabled) {
+            Log.i(TAG, "WireGuard enabled, setting up proxies for host: " + host);
             try {
                 // Build WireGuard config
                 WireGuardManager.Config wgConfig = new WireGuardManager.Config()
@@ -584,9 +585,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         .setTunnelAddress(prefConfig.wgTunnelAddress);
 
                 // Use direct WireGuard HTTP for API requests (bypasses OkHttp via JNI)
-                if (WireGuardManager.configureHttp(wgConfig, prefConfig.wgServerAddress)) {
+                if (WireGuardManager.configureHttp(wgConfig, host)) {
                     NvHTTP.setUseDirectWgHttp(true);
-                    Log.i(TAG, "Direct WireGuard HTTP configured (JNI bypass)");
+                    Log.i(TAG, "Direct WireGuard HTTP configured for " + host);
                 } else {
                     Log.e(TAG, "Failed to configure direct WireGuard HTTP");
                 }
@@ -609,35 +610,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 if (wgResult == 0) {
                     Log.i(TAG, "WireGuard tunnel started");
                     
-                    // Create streaming UDP proxies (binds to local ports 47998, 47999, 48000)
-                    // These forward to the WireGuard server address
-                    boolean proxyResult = MoonBridge.wgCreateStreamingProxies(prefConfig.wgServerAddress, 47998);
-                    if (proxyResult) {
-                        // Use 127.0.0.1 for native streaming - traffic goes through local proxies
-                        host = "127.0.0.1";
-                        Log.i(TAG, "Streaming traffic will route through WireGuard proxies");
+                    // Enable direct WireGuard routing - socket layer hook intercepts traffic
+                    // to the target host IP and encapsulates directly through the tunnel
+                    boolean routingResult = MoonBridge.wgEnableDirectRouting(host);
+                    if (routingResult) {
+                        Log.i(TAG, "Direct WireGuard routing enabled for " + host);
                     } else {
-                        Log.e(TAG, "Failed to create WireGuard streaming proxies");
-                    }
-                    
-                    // Create TCP proxies for all ports that moonlight-common-c may try to connect:
-                    // - httpsPort (47984 for GFE): RTSP handshake
-                    // - 47989: HTTP port (fallback for name resolution)
-                    // - 48010: Sunshine RTSP port
-                    java.util.Set<Integer> tcpPorts = new java.util.LinkedHashSet<>();
-                    tcpPorts.add(httpsPort);
-                    tcpPorts.add(47984);
-                    tcpPorts.add(47989);
-                    tcpPorts.add(48010);
-                    for (int tcpPort : tcpPorts) {
-                        int tcpProxyPort = MoonBridge.wgCreateTcpProxy(privateKey, peerPublicKey, presharedKey,
-                                prefConfig.wgEndpoint, prefConfig.wgTunnelAddress, prefConfig.wgServerAddress,
-                                tcpPort, 25, 1420);
-                        if (tcpProxyPort > 0) {
-                            Log.i(TAG, "TCP proxy for port " + tcpPort + " -> 127.0.0.1:" + tcpProxyPort);
-                        } else {
-                            Log.w(TAG, "Failed to create TCP proxy for port " + tcpPort);
-                        }
+                        Log.e(TAG, "Failed to enable direct WireGuard routing");
                     }
                 } else {
                     Log.e(TAG, "Failed to start WireGuard tunnel: " + wgResult);
@@ -2606,20 +2585,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 public void run() {
                     conn.stop();
                     
-                    // Clear direct WireGuard HTTP config and TCP proxies
+                    // Clear direct WireGuard HTTP config
                     if (WireGuardManager.isHttpConfigured()) {
-                        WireGuardManager.stopTcpProxies();
                         WireGuardManager.clearHttpConfig();
                         NvHTTP.setUseDirectWgHttp(false);
-                        Log.i(TAG, "WireGuard direct HTTP and TCP proxies cleared");
+                        Log.i(TAG, "WireGuard direct HTTP cleared");
                     }
                     
-                    // Stop WireGuard TCP proxy and tunnel
-                    if (MoonBridge.wgIsTcpProxyRunning()) {
-                        MoonBridge.wgStopTcpProxy();
-                        Log.i(TAG, "WireGuard TCP proxy stopped");
-                    }
-                    
+                    // Stop WireGuard tunnel
                     if (MoonBridge.wgIsTunnelActive()) {
                         MoonBridge.wgStopTunnel();
                         Log.i(TAG, "WireGuard tunnel stopped");

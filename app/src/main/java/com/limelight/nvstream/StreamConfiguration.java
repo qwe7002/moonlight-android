@@ -35,7 +35,6 @@ public class StreamConfiguration {
     private String wgPresharedKey;
     private String wgEndpoint;
     private String wgTunnelAddress;
-    private String wgServerAddress;
 
     public static class Builder {
         private StreamConfiguration config = new StreamConfiguration();
