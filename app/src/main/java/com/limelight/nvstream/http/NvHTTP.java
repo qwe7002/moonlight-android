@@ -456,12 +456,40 @@ public class NvHTTP {
         return openHttpConnection(client, baseUrl, "applist", null);
     }
 
+    /**
+     * Get a proxy base URL that routes through WireGuard TCP proxy.
+     * Creates a TCP proxy if one doesn't exist for the target port.
+     */
+    private HttpUrl getWgProxyBaseUrl(HttpUrl baseUrl) throws IOException {
+        int targetPort = baseUrl.port();
+        int localProxyPort = WireGuardManager.getTcpProxyPort(targetPort);
+        if (localProxyPort <= 0) {
+            localProxyPort = WireGuardManager.createTcpProxy(targetPort);
+            if (localProxyPort <= 0) {
+                throw new IOException("Failed to create WireGuard TCP proxy for port " + targetPort);
+            }
+        }
+        Log.d(TAG, "WireGuard TCP proxy: port " + targetPort + " -> 127.0.0.1:" + localProxyPort);
+        return baseUrl.newBuilder()
+                .host("127.0.0.1")
+                .port(localProxyPort)
+                .build();
+    }
+
     // Read timeout should be enabled for any HTTP query that requires no outside action
     // on the GFE server. Examples of queries that DO require outside action are launch, resume, and quit.
     // The initial pair query does require outside action (user entering a PIN) but subsequent pairing
     // queries do not.
     private ResponseBody openHttpConnection(OkHttpClient client, HttpUrl baseUrl, String path, String query) throws IOException {
-        HttpUrl completeUrl = getCompleteUrl(baseUrl, path, query);
+        // Route ALL traffic through WireGuard TCP proxy when enabled
+        HttpUrl effectiveBaseUrl = baseUrl;
+        if (isDirectWgHttpEnabled()) {
+            effectiveBaseUrl = getWgProxyBaseUrl(baseUrl);
+            Log.i(TAG, "WireGuard routing: " + baseUrl.host() + ":" + baseUrl.port()
+                    + " -> " + effectiveBaseUrl.host() + ":" + effectiveBaseUrl.port());
+        }
+
+        HttpUrl completeUrl = getCompleteUrl(effectiveBaseUrl, path, query);
         Request request = new Request.Builder().url(completeUrl).get().build();
         Response response;
         try {
@@ -499,16 +527,7 @@ public class NvHTTP {
     }
 
     private String openHttpConnectionToString(OkHttpClient client, HttpUrl baseUrl, String path, String query) throws IOException {
-        // Use direct WireGuard HTTP if enabled (bypasses OkHttp for HTTP)
-        if (isDirectWgHttpEnabled() && baseUrl.scheme().equals("http")) {
-            return openWgHttpConnectionToString(baseUrl, path, query);
-        }
-
-        // Use TCP proxy through WireGuard for HTTPS
-        if (isDirectWgHttpEnabled() && baseUrl.scheme().equals("https")) {
-            return openWgHttpsConnectionToString(client, baseUrl, path, query);
-        }
-
+        // All traffic is routed through WireGuard TCP proxy via openHttpConnection() when WG is enabled
         try {
             ResponseBody resp = openHttpConnection(client, baseUrl, path, query);
             String respString = resp.string();

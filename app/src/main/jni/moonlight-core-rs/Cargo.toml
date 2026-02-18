@@ -29,6 +29,8 @@ x25519-dalek = "2.0.0-rc.3"
 base64 = "0.22"
 # Smoltcp for userspace TCP/IP stack over WireGuard tunnel
 smoltcp = { version = "0.11", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "proto-ipv6", "socket-udp", "socket-tcp"] }
+# Etherparse for TCP/IP packet construction and parsing (used by virtual TCP stack)
+etherparse = "0.16"
 # Parking lot for efficient synchronization
 parking_lot = "0.12"
 

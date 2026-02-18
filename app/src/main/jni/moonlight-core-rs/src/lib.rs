@@ -24,6 +24,8 @@ pub mod wireguard_config;
 #[cfg(target_os = "android")]
 pub mod wireguard;
 #[cfg(target_os = "android")]
+pub mod tun_stack;
+#[cfg(target_os = "android")]
 pub mod wg_http;
 
 #[cfg(target_os = "android")]
