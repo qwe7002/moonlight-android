@@ -4,16 +4,20 @@ import java.util.ArrayList;
 import java.util.Iterator;
 
 import android.app.Activity;
-import android.app.ProgressDialog;
 import android.content.DialogInterface;
 import android.content.DialogInterface.OnCancelListener;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.Space;
+import android.widget.TextView;
+
+import androidx.appcompat.app.AlertDialog;
 
 public class SpinnerDialog implements Runnable,OnCancelListener {
     private final String title;
     private final String message;
     private final Activity activity;
-    @SuppressWarnings("deprecation")
-    private ProgressDialog progress;
+    private AlertDialog progress;
     private final boolean finish;
 
     private static final ArrayList<SpinnerDialog> rundownDialogs = new ArrayList<>();
@@ -60,10 +64,15 @@ public class SpinnerDialog implements Runnable,OnCancelListener {
         activity.runOnUiThread(this);
     }
 
+    private TextView messageView;
+
     public void setMessage(final String message)
     {
-        //noinspection deprecation
-        activity.runOnUiThread(() -> progress.setMessage(message));
+        activity.runOnUiThread(() -> {
+            if (messageView != null) {
+                messageView.setText(message);
+            }
+        });
     }
 
     @Override
@@ -76,25 +85,47 @@ public class SpinnerDialog implements Runnable,OnCancelListener {
 
         if (progress == null)
         {
-            //noinspection deprecation
-            progress = new ProgressDialog(activity);
+            // Create layout with progress bar
+            LinearLayout layout = new LinearLayout(activity);
+            layout.setOrientation(LinearLayout.HORIZONTAL);
+            layout.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            int padding = (int) (24 * activity.getResources().getDisplayMetrics().density);
+            layout.setPadding(padding, padding, padding, padding);
 
-            progress.setTitle(title);
-            //noinspection deprecation
-            progress.setMessage(message);
-            //noinspection deprecation
-            progress.setProgressStyle(ProgressDialog.STYLE_SPINNER);
-            progress.setOnCancelListener(this);
+            // Add progress bar
+            ProgressBar progressBar = new ProgressBar(activity);
+            // Set the progress bar color to red (colorAccent) to match app theme
+            progressBar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFFFF5252));
+            layout.addView(progressBar);
+
+            // Add spacing
+            Space space = new Space(activity);
+            space.setMinimumWidth((int) (16 * activity.getResources().getDisplayMetrics().density));
+            layout.addView(space);
+
+            // Add message text
+            messageView = new TextView(activity);
+            messageView.setText(message);
+            messageView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
+            layout.addView(messageView);
+
+            // Create the dialog
+            AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+                    .setTitle(title)
+                    .setView(layout)
+                    .setOnCancelListener(this);
 
             // If we want to finish the activity when this is killed, make it cancellable
             if (finish)
             {
-                progress.setCancelable(true);
+                builder.setCancelable(true);
+                progress = builder.create();
                 progress.setCanceledOnTouchOutside(false);
             }
             else
             {
-                progress.setCancelable(false);
+                builder.setCancelable(false);
+                progress = builder.create();
             }
 
             synchronized (rundownDialogs) {
