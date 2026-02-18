@@ -4,11 +4,12 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="280dp"
     android:layout_height="wrap_content"
-    android:layout_margin="8dp"
+    android:layout_margin="4dp"
     app:cardCornerRadius="12dp"
     app:cardElevation="4dp"
     app:cardBackgroundColor="#1E1E1E"
-    app:strokeWidth="0dp">
+    app:strokeWidth="0dp"
+    android:descendantFocusability="blocksDescendants">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -55,6 +56,7 @@
                     android:layout_width="24dp"
                     android:layout_height="24dp"
                     android:indeterminate="true"
+                    android:indeterminateTint="@color/colorAccent"
                     android:visibility="gone" />
 
             </LinearLayout>
@@ -70,31 +72,35 @@
                 <com.google.android.material.chip.Chip
                     android:id="@+id/status_chip"
                     android:layout_width="wrap_content"
-                    android:layout_height="32dp"
+                    android:layout_height="wrap_content"
                     android:textSize="12sp"
                     app:chipMinHeight="24dp"
-                    app:chipCornerRadius="12dp"
+                    app:chipCornerRadius="18dp"
                     app:chipStrokeWidth="0dp"
                     app:textStartPadding="8dp"
                     app:textEndPadding="8dp"
-                    android:clickable="false" />
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false" />
 
                 <!-- Running game chip (hidden by default) -->
                 <com.google.android.material.chip.Chip
                     android:id="@+id/game_running_chip"
                     android:layout_width="wrap_content"
-                    android:layout_height="32dp"
+                    android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
                     android:text="@string/applist_menu_resume"
                     android:textSize="12sp"
                     app:chipMinHeight="24dp"
-                    app:chipCornerRadius="12dp"
+                    app:chipCornerRadius="18dp"
                     app:chipBackgroundColor="#2196F3"
                     android:textColor="#FFFFFF"
                     app:chipStrokeWidth="0dp"
                     app:textStartPadding="8dp"
                     app:textEndPadding="8dp"
                     android:clickable="false"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false"
                     android:visibility="gone" />
 
                 <!-- Status overlay (lock icon for unpaired) - hidden, keeping for compatibility -->

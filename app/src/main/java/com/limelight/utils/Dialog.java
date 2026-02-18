@@ -311,6 +311,8 @@ public class Dialog implements Runnable {
 
         // Add progress bar
         android.widget.ProgressBar progressBar = new android.widget.ProgressBar(activity);
+        // Set the progress bar color to red (colorAccent)
+        progressBar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFFFF5252));
         layout.addView(progressBar);
 
         // Add spacing

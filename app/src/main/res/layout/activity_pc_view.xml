@@ -32,7 +32,8 @@
                     android:id="@+id/pcs_loading"
                     android:layout_width="75dp"
                     android:layout_height="75dp"
-                    android:indeterminate="true"/>
+                    android:indeterminate="true"
+                    android:indeterminateTint="@color/colorAccent"/>
                 <TextView
                     android:id="@+id/searching_text"
                     android:layout_width="wrap_content"

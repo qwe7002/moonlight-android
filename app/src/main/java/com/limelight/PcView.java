@@ -208,6 +208,35 @@ public class PcView extends FragmentActivity implements AdapterFragmentCallbacks
 
         pcGridAdapter = new PcGridAdapter(this, prefConfig);
 
+        // Set up card action listener for refresh, wake, and delete buttons
+        pcGridAdapter.setCardActionListener(new PcGridAdapter.CardActionListener() {
+            @Override
+            public void onRefreshClick(ComputerObject computer) {
+                if (managerBinder != null) {
+                    managerBinder.invalidateStateForComputer(computer.details.uuid);
+                }
+            }
+
+            @Override
+            public void onWakeClick(ComputerObject computer) {
+                if (managerBinder != null && computer.details.macAddress != null) {
+                    Toast.makeText(PcView.this, R.string.pcview_menu_send_wol, Toast.LENGTH_SHORT).show();
+                    managerBinder.invalidateStateForComputer(computer.details.uuid);
+                }
+            }
+
+            @Override
+            public void onDeleteClick(ComputerObject computer) {
+                UiHelper.displayDeletePcConfirmationDialog(PcView.this, computer.details, () -> {
+                    if (managerBinder == null) {
+                        Toast.makeText(PcView.this, getResources().getString(R.string.error_manager_not_running), Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    removeComputer(computer.details);
+                }, null);
+            }
+        });
+
         initializeViews();
     }
 
