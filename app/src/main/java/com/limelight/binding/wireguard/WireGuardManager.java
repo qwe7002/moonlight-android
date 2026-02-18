@@ -367,74 +367,7 @@ public class WireGuardManager {
         return httpConfigured && nativeHttpIsConfigured();
     }
 
-    /**
-     * Make an HTTP GET request directly through WireGuard.
-     * This bypasses OkHttp entirely for lower latency.
-     *
-     * @param host The target host (used for Host header)
-     * @param port The target port
-     * @param path The request path including query string
-     * @return Response body string, or null on failure
-     */
-    public static String httpGet(String host, int port, String path) {
-        if (!httpConfigured) {
-            Log.e(TAG, "WireGuard HTTP not configured");
-            return null;
-        }
-
-        try {
-            return nativeHttpGet(host, port, path);
-        } catch (Exception e) {
-            Log.e(TAG, "WireGuard HTTP GET failed", e);
-            return null;
-        }
-    }
-
-    /**
-     * Result class for HTTP requests with status code
-     */
-    public static class HttpResult {
-        public final int statusCode;
-        public final String body;
-
-        public HttpResult(int statusCode, String body) {
-            this.statusCode = statusCode;
-            this.body = body;
-        }
-
-        public boolean isSuccess() {
-            return statusCode >= 200 && statusCode < 300;
-        }
-    }
-
-    /**
-     * Make an HTTP GET request with status code.
-     *
-     * @param host The target host
-     * @param port The target port
-     * @param path The request path
-     * @return HttpResult with status code and body, or null on failure
-     */
-    public static HttpResult httpGetWithStatus(String host, int port, String path) {
-        if (!httpConfigured) {
-            Log.e(TAG, "WireGuard HTTP not configured");
-            return null;
-        }
-
-        try {
-            String[] bodyArray = new String[1];
-            int statusCode = nativeHttpGetWithStatus(host, port, path, bodyArray);
-            if (statusCode < 0) {
-                return null;
-            }
-            return new HttpResult(statusCode, bodyArray[0]);
-        } catch (Exception e) {
-            Log.e(TAG, "WireGuard HTTP GET with status failed", e);
-            return null;
-        }
-    }
-
-    // Direct HTTP native methods
+    // Direct HTTP native methods (config only - actual HTTP now goes through OkHttp + WgSocket)
     private static native boolean nativeHttpSetConfig(
         byte[] privateKey,
         byte[] peerPublicKey,
@@ -447,6 +380,4 @@ public class WireGuardManager {
     );
     private static native void nativeHttpClearConfig();
     private static native boolean nativeHttpIsConfigured();
-    private static native String nativeHttpGet(String host, int port, String path);
-    private static native int nativeHttpGetWithStatus(String host, int port, String path, String[] resultBody);
 }

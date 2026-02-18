@@ -598,7 +598,7 @@ public class PairingService extends Service {
     }
     
     /**
-     * Set up WireGuard direct HTTP for pairing if enabled in preferences
+     * Set up WireGuard HTTP routing for pairing if enabled in preferences
      * @param computerAddress The target server address to route through WireGuard
      */
     private void setupWireGuardProxy(String computerAddress) {
@@ -629,7 +629,7 @@ public class PairingService extends Service {
                     .setEndpoint(wgEndpoint)
                     .setTunnelAddress(wgTunnelAddress);
             
-            // Configure direct WireGuard HTTP (bypasses OkHttp via JNI)
+            // Configure WireGuard HTTP routing (OkHttp uses WgSocket)
             // Use the target computer address for routing
             if (WireGuardManager.configureHttp(wgConfig, computerAddress)) {
                 NvHTTP.setUseDirectWgHttp(true);

@@ -584,10 +584,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         .setEndpoint(prefConfig.wgEndpoint)
                         .setTunnelAddress(prefConfig.wgTunnelAddress);
 
-                // Use direct WireGuard HTTP for API requests (bypasses OkHttp via JNI)
+                // Configure WireGuard HTTP routing (OkHttp uses WgSocket)
                 if (WireGuardManager.configureHttp(wgConfig, host)) {
                     NvHTTP.setUseDirectWgHttp(true);
-                    Log.i(TAG, "Direct WireGuard HTTP configured for " + host);
+                    Log.i(TAG, "WireGuard HTTP routing configured for " + host);
                 } else {
                     Log.e(TAG, "Failed to configure direct WireGuard HTTP");
                 }
