@@ -31,6 +31,7 @@ pub enum TcpState {
     FinWait1,
     FinWait2,
     CloseWait,
+    LastAck,
     TimeWait,
 }
 
@@ -362,6 +363,7 @@ impl VirtualStack {
                             }
                         } else if tcp_header.rst {
                             tcb.state = TcpState::Closed;
+                            tcb.last_activity = Instant::now();
                             warn!("Connection reset during handshake");
                             TcpPacketAction::None
                         } else {
@@ -402,6 +404,7 @@ impl VirtualStack {
                             }
                         } else if tcp_header.rst {
                             tcb.state = TcpState::Closed;
+                            tcb.last_activity = Instant::now();
                             warn!("Connection reset by peer");
                             TcpPacketAction::None
                         } else if !tcp_payload.is_empty() {
@@ -515,8 +518,16 @@ impl VirtualStack {
                         }
                     }
                     TcpState::CloseWait => {
+                        tcb.last_activity = Instant::now();
+                        // In CloseWait, we haven't sent our FIN yet, just waiting for app to close
+                        TcpPacketAction::None
+                    }
+                    TcpState::LastAck => {
+                        tcb.last_activity = Instant::now();
+                        // Waiting for final ACK of our FIN
                         if tcp_header.ack {
                             tcb.state = TcpState::Closed;
+                            tcb.last_activity = Instant::now(); // Reset for grace period
                         }
                         TcpPacketAction::None
                     }
@@ -552,6 +563,12 @@ impl VirtualStack {
                     TcpFlags::FIN | TcpFlags::ACK,
                     &[],
                 );
+                // Transition to LastAck - we've sent our FIN, waiting for final ACK
+                let mut conns = self.tcp_connections.lock();
+                if let Some(tcb) = conns.get_mut(&conn_id) {
+                    tcb.state = TcpState::LastAck;
+                    tcb.last_activity = Instant::now();
+                }
             }
             TcpPacketAction::SendData { seq, ack, data, tx } => {
                 // ACK the data
@@ -563,6 +580,7 @@ impl VirtualStack {
                     let mut conns = self.tcp_connections.lock();
                     if let Some(tcb) = conns.get_mut(&conn_id) {
                         tcb.state = TcpState::Closed;
+                        tcb.last_activity = Instant::now();
                     }
                 }
             }
@@ -576,6 +594,7 @@ impl VirtualStack {
                         let mut conns = self.tcp_connections.lock();
                         if let Some(tcb) = conns.get_mut(&conn_id) {
                             tcb.state = TcpState::Closed;
+                            tcb.last_activity = Instant::now();
                         }
                         break;
                     }
@@ -668,9 +687,10 @@ impl VirtualStack {
         conns.retain(|id, tcb| {
             let stale = match tcb.state {
                 TcpState::TimeWait => now.duration_since(tcb.last_activity).as_secs() > 60,
-                TcpState::Closed => true,
+                // Give Closed connections a brief grace period for any in-flight packets
+                TcpState::Closed => now.duration_since(tcb.last_activity).as_secs() > 5,
                 TcpState::SynSent => now.duration_since(tcb.created_at).as_secs() > 30,
-                TcpState::FinWait1 | TcpState::FinWait2 | TcpState::CloseWait => {
+                TcpState::FinWait1 | TcpState::FinWait2 | TcpState::CloseWait | TcpState::LastAck => {
                     now.duration_since(tcb.last_activity).as_secs() > 120
                 }
                 TcpState::Established => {
