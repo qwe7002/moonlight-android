@@ -256,11 +256,15 @@ public class PairingService extends Service {
                 if (verifyResult == 401) {
                     Log.e(TAG, "Sunshine authentication failed - invalid credentials");
                     message = getString(R.string.sunshine_pairing_auth_failed);
-                } else if (verifyResult != 200 && verifyResult != -2) {
+                } else if (verifyResult != 200 && verifyResult != -2 && verifyResult != -1) {
                     // -2 means endpoint not found (older Sunshine), proceed with pairing
+                    // -1 means network error (proxy issue, etc.), also proceed with pairing
                     Log.e(TAG, "Failed to verify Sunshine credentials, response code: " + verifyResult);
                     message = getString(R.string.pair_fail);
                 } else {
+                    if (verifyResult == -1) {
+                        Log.w(TAG, "Sunshine credential verification had network error, proceeding with pairing anyway");
+                    }
                     // Credentials verified or verification not supported, proceed with pairing
                     PairingManager pm = httpConn.getPairingManager();
 
@@ -363,6 +367,33 @@ public class PairingService extends Service {
     }
 
     /**
+     * Ensure a TCP proxy for Sunshine API port 47990 exists.
+     * If WireGuard is enabled but the proxy doesn't exist yet, try to create it.
+     * @return Local proxy port (>0) if available, -1 if WG not enabled or proxy creation failed
+     */
+    private int ensureSunshineProxyPort() {
+        if (!wgProxyStarted) {
+            return -1;
+        }
+        
+        int proxyPort = WireGuardManager.getTcpProxyPort(47990);
+        if (proxyPort > 0) {
+            Log.d(TAG, "Sunshine API proxy already exists on port " + proxyPort);
+            return proxyPort;
+        }
+        
+        // Proxy not found - try to create it
+        Log.w(TAG, "Sunshine API proxy for port 47990 not found (getTcpProxyPort returned " + proxyPort + "), creating...");
+        proxyPort = WireGuardManager.createTcpProxy(47990);
+        if (proxyPort > 0) {
+            Log.i(TAG, "Sunshine API proxy created on-the-fly on port " + proxyPort);
+        } else {
+            Log.e(TAG, "Failed to create Sunshine API proxy for port 47990");
+        }
+        return proxyPort;
+    }
+
+    /**
      * Verify Sunshine credentials by calling a simple API endpoint
      *
      * @return HTTP response code (200 = success, 401 = auth failed, -2 = endpoint not found, -1 = error)
@@ -411,11 +442,13 @@ public class PairingService extends Service {
             java.net.URL apiUrl = new java.net.URL(url);
 
             // Use TCP proxy through WireGuard if available
-            int proxyPort = WireGuardManager.getTcpProxyPort(47990);
+            int proxyPort = ensureSunshineProxyPort();
             if (proxyPort > 0) {
                 String proxyUrl = "https://127.0.0.1:" + proxyPort + "/api/apps";
                 Log.i(TAG, "Using WireGuard TCP proxy for Sunshine API: " + proxyUrl);
                 apiUrl = new java.net.URL(proxyUrl);
+            } else if (wgProxyStarted) {
+                Log.e(TAG, "WireGuard enabled but no proxy available for port 47990, direct connection will likely fail");
             }
 
             connection = (javax.net.ssl.HttpsURLConnection) apiUrl.openConnection();
@@ -426,8 +459,8 @@ public class PairingService extends Service {
             connection.setRequestMethod("GET");
             connection.setRequestProperty("Authorization", basicAuth);
             connection.setRequestProperty("Accept", "*/*");
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(10000);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(15000);
 
             int responseCode = connection.getResponseCode();
             Log.i(TAG, "Sunshine credentials verification response code: " + responseCode);
@@ -513,11 +546,13 @@ public class PairingService extends Service {
             java.net.URL apiUrl = new java.net.URL(url);
 
             // Use TCP proxy through WireGuard if available
-            int proxyPort = WireGuardManager.getTcpProxyPort(47990);
+            int proxyPort = ensureSunshineProxyPort();
             if (proxyPort > 0) {
                 String proxyUrl = "https://127.0.0.1:" + proxyPort + "/api/pin";
                 Log.i(TAG, "Using WireGuard TCP proxy for Sunshine PIN API: " + proxyUrl);
                 apiUrl = new java.net.URL(proxyUrl);
+            } else if (wgProxyStarted) {
+                Log.e(TAG, "WireGuard enabled but no proxy available for port 47990, PIN submission will likely fail");
             }
 
             connection = (javax.net.ssl.HttpsURLConnection) apiUrl.openConnection();
@@ -646,7 +681,13 @@ public class PairingService extends Service {
                 int sunshineProxyPort = WireGuardManager.createTcpProxy(47990);
                 if (sunshineProxyPort > 0) {
                     Log.i(TAG, "TCP proxy for Sunshine API created on port " + sunshineProxyPort);
+                } else {
+                    Log.e(TAG, "Failed to create TCP proxy for Sunshine API port 47990");
                 }
+                
+                // Verify the proxy is accessible
+                int verifyPort = WireGuardManager.getTcpProxyPort(47990);
+                Log.i(TAG, "Sunshine API proxy verification: getTcpProxyPort(47990) = " + verifyPort);
                 
                 wgProxyStarted = true;
                 Log.i(TAG, "WireGuard configured for pairing (HTTP via JNI, HTTPS via TCP proxy)");
