@@ -91,6 +91,8 @@ struct UdpProxyEntry {
     target_addr: SocketAddr,
     /// The local address moonlight connects to
     local_addr: SocketAddr,
+    /// The client address that connected to this proxy (for sending responses back)
+    client_addr: Arc<Mutex<Option<SocketAddr>>>,
 }
 
 impl WireGuardTunnel {
@@ -227,10 +229,13 @@ impl WireGuardTunnel {
         let proxy_recv = proxy_socket.try_clone()?;
 
         let target = target_addr;
+        let client_addr_tracker = Arc::new(Mutex::new(None::<SocketAddr>));
+        let client_addr_for_loop = client_addr_tracker.clone();
+        
         thread::Builder::new()
             .name(format!("wg-udp-fwd-{}", local_addr.port()))
             .spawn(move || {
-                Self::udp_proxy_forward_loop(state, running, proxy_recv, target);
+                Self::udp_proxy_forward_loop(state, running, proxy_recv, target, client_addr_for_loop);
             })?;
 
         // Register the proxy for reverse traffic (WireGuard -> local)
@@ -238,6 +243,7 @@ impl WireGuardTunnel {
             proxy_socket,
             target_addr,
             local_addr,
+            client_addr: client_addr_tracker,
         });
 
         Ok(local_addr)
@@ -253,6 +259,7 @@ impl WireGuardTunnel {
     /// - RTSP port (47989 or 48010): setup (TCP)
     pub fn create_streaming_proxies(&self, target_ip: Ipv4Addr, base_port: u16) -> io::Result<()> {
         // Create proxies for video, control, audio
+        let mut success_count = 0;
         for offset in 0..3 {
             let port = base_port + offset;
             let target = SocketAddr::new(IpAddr::V4(target_ip), port);
@@ -261,32 +268,66 @@ impl WireGuardTunnel {
             let proxy_socket = match UdpSocket::bind(format!("127.0.0.1:{}", port)) {
                 Ok(s) => s,
                 Err(e) => {
-                    warn!("Could not bind to port {}, using random port: {}", port, e);
-                    UdpSocket::bind("127.0.0.1:0")?
+                    warn!("Could not bind to port {}: {}, trying random port", port, e);
+                    match UdpSocket::bind("127.0.0.1:0") {
+                        Ok(s) => s,
+                        Err(e2) => {
+                            error!("Failed to create UDP proxy for port {}: {}", port, e2);
+                            continue; // Skip this port, try next
+                        }
+                    }
                 }
             };
-            let local_addr = proxy_socket.local_addr()?;
-            proxy_socket.set_nonblocking(true)?;
+            let local_addr = match proxy_socket.local_addr() {
+                Ok(addr) => addr,
+                Err(e) => {
+                    error!("Failed to get local address for port {}: {}", port, e);
+                    continue;
+                }
+            };
+            if let Err(e) = proxy_socket.set_nonblocking(true) {
+                error!("Failed to set nonblocking for port {}: {}", port, e);
+                continue;
+            }
 
             info!("Created streaming UDP proxy: {} -> {} (via WireGuard)", local_addr, target);
 
             let state = self.state.clone();
             let running = self.running.clone();
-            let proxy_recv = proxy_socket.try_clone()?;
+            let proxy_recv = match proxy_socket.try_clone() {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Failed to clone UDP socket for port {}: {}", port, e);
+                    continue;
+                }
+            };
 
-            thread::Builder::new()
+            let client_addr_tracker = Arc::new(Mutex::new(None::<SocketAddr>));
+            let client_addr_for_loop = client_addr_tracker.clone();
+
+            if let Err(e) = thread::Builder::new()
                 .name(format!("wg-udp-stream-{}", port))
                 .spawn(move || {
-                    Self::udp_proxy_forward_loop(state, running, proxy_recv, target);
-                })?;
+                    Self::udp_proxy_forward_loop(state, running, proxy_recv, target, client_addr_for_loop);
+                }) {
+                error!("Failed to spawn UDP proxy thread for port {}: {}", port, e);
+                continue;
+            }
 
             self.udp_proxies.lock().insert(port, UdpProxyEntry {
                 proxy_socket,
                 target_addr: target,
                 local_addr,
+                client_addr: client_addr_tracker,
             });
+            success_count += 1;
         }
 
+        if success_count == 0 {
+            return Err(io::Error::new(io::ErrorKind::Other, "Failed to create any UDP proxy"));
+        }
+        
+        info!("Created {}/3 streaming UDP proxies", success_count);
         Ok(())
     }
 
@@ -417,9 +458,14 @@ impl WireGuardTunnel {
                                 // Find the proxy for this source port (the remote server port)
                                 let proxies = udp_proxies.lock();
                                 if let Some(proxy) = proxies.get(&src_port) {
-                                    // Send decapsulated data back to moonlight-common-c via the local proxy
-                                    if let Err(e) = proxy.proxy_socket.send_to(payload, proxy.local_addr) {
-                                        debug!("Failed to forward decapsulated packet to proxy: {}", e);
+                                    // Send decapsulated data back to the client that connected to this proxy
+                                    let client = proxy.client_addr.lock();
+                                    if let Some(client_addr) = *client {
+                                        if let Err(e) = proxy.proxy_socket.send_to(payload, client_addr) {
+                                            debug!("Failed to forward decapsulated UDP packet to {}: {}", client_addr, e);
+                                        }
+                                    } else {
+                                        debug!("No client connected to proxy for port {} yet", src_port);
                                     }
                                 } else {
                                     debug!("No proxy found for source port {}", src_port);
@@ -446,6 +492,7 @@ impl WireGuardTunnel {
         running: Arc<AtomicBool>,
         proxy_socket: UdpSocket,
         target_addr: SocketAddr,
+        client_addr_tracker: Arc<Mutex<Option<SocketAddr>>>,
     ) {
         let mut recv_buf = vec![0u8; MAX_UDP_PACKET_SIZE];
         let mut dst_buf = vec![0u8; WG_BUFFER_SIZE];
@@ -468,6 +515,15 @@ impl WireGuardTunnel {
                     continue;
                 }
             };
+
+            // Store the client address so we can send responses back
+            {
+                let mut client = client_addr_tracker.lock();
+                if client.is_none() || *client != Some(src_addr) {
+                    debug!("UDP proxy: tracking client {} for target {}", src_addr, target_addr);
+                    *client = Some(src_addr);
+                }
+            }
 
             // Build IP/UDP packet and encapsulate through WireGuard
             let src_socket_addr = SocketAddr::new(
