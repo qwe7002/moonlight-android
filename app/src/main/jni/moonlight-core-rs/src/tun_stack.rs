@@ -11,7 +11,7 @@
 //! - Outgoing packets queued for the caller to send through WireGuard
 //! - Incoming data delivered to application via mpsc channels
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
@@ -47,11 +47,19 @@ pub struct TcpConnectionId {
 struct TcpControlBlock {
     state: TcpState,
     local_seq: u32,
+    /// The next expected sequence number from the remote (used for ACKs)
     local_ack: u32,
     tx_to_app: mpsc::SyncSender<Vec<u8>>,
     #[allow(dead_code)]
     created_at: Instant,
     last_activity: Instant,
+    /// Out-of-order segment buffer: sequence_number -> data
+    /// Used to reorder segments that arrive before their expected position
+    reorder_buffer: BTreeMap<u32, Vec<u8>>,
+    /// Maximum reorder buffer size (to prevent memory exhaustion)
+    max_reorder_buffer_bytes: usize,
+    /// Current reorder buffer size in bytes
+    reorder_buffer_bytes: usize,
 }
 
 /// Action to perform after processing a TCP packet (outside the lock)
@@ -64,6 +72,15 @@ enum TcpPacketAction {
         data: Vec<u8>,
         tx: mpsc::SyncSender<Vec<u8>>,
     },
+    /// Multiple data segments to deliver (for reorder buffer flush)
+    SendMultipleData {
+        seq: u32,
+        ack: u32,
+        data_segments: Vec<Vec<u8>>,
+        tx: mpsc::SyncSender<Vec<u8>>,
+    },
+    /// Out-of-order segment buffered, send duplicate ACK
+    BufferedOutOfOrder { seq: u32, ack: u32 },
     ConnectionEstablished { seq: u32, ack: u32 },
     None,
 }
@@ -152,6 +169,9 @@ impl VirtualStack {
             tx_to_app: tx,
             created_at: now,
             last_activity: now,
+            reorder_buffer: BTreeMap::new(),
+            max_reorder_buffer_bytes: 256 * 1024, // 256KB max buffer
+            reorder_buffer_bytes: 0,
         };
 
         {
@@ -351,28 +371,112 @@ impl VirtualStack {
                     TcpState::Established => {
                         tcb.last_activity = Instant::now();
                         if tcp_header.fin {
-                            // Remote closing
+                            // Remote closing - first deliver any buffered data
+                            let mut segments = Vec::new();
+                            while let Some(entry) = tcb.reorder_buffer.first_entry() {
+                                if *entry.key() == tcb.local_ack {
+                                    let data = entry.remove();
+                                    tcb.local_ack = tcb.local_ack.wrapping_add(data.len() as u32);
+                                    tcb.reorder_buffer_bytes -= data.len();
+                                    segments.push(data);
+                                } else {
+                                    break;
+                                }
+                            }
                             tcb.state = TcpState::CloseWait;
-                            tcb.local_ack =
-                                tcp_header.sequence_number.wrapping_add(1);
-                            TcpPacketAction::SendFinAck {
-                                seq: tcb.local_seq,
-                                ack: tcb.local_ack,
+                            tcb.local_ack = tcp_header.sequence_number.wrapping_add(1);
+                            
+                            if !segments.is_empty() {
+                                // Deliver buffered data before FIN
+                                TcpPacketAction::SendMultipleData {
+                                    seq: tcb.local_seq,
+                                    ack: tcb.local_ack,
+                                    data_segments: segments,
+                                    tx: tcb.tx_to_app.clone(),
+                                }
+                            } else {
+                                TcpPacketAction::SendFinAck {
+                                    seq: tcb.local_seq,
+                                    ack: tcb.local_ack,
+                                }
                             }
                         } else if tcp_header.rst {
                             tcb.state = TcpState::Closed;
                             warn!("Connection reset by peer");
                             TcpPacketAction::None
                         } else if !tcp_payload.is_empty() {
-                            // Data received
-                            tcb.local_ack = tcp_header
-                                .sequence_number
-                                .wrapping_add(tcp_payload.len() as u32);
-                            TcpPacketAction::SendData {
-                                seq: tcb.local_seq,
-                                ack: tcb.local_ack,
-                                data: tcp_payload.to_vec(),
-                                tx: tcb.tx_to_app.clone(),
+                            // Data received - check if it's in sequence
+                            let pkt_seq = tcp_header.sequence_number;
+                            let expected_seq = tcb.local_ack;
+                            
+                            // Check for duplicate/retransmit (seq < expected)
+                            // Use wrapping comparison for sequence numbers
+                            let seq_diff = pkt_seq.wrapping_sub(expected_seq) as i32;
+                            
+                            if seq_diff < 0 {
+                                // Duplicate or retransmit - just ACK
+                                debug!("Duplicate TCP segment seq={}, expected={}", pkt_seq, expected_seq);
+                                TcpPacketAction::SendAck {
+                                    seq: tcb.local_seq,
+                                    ack: tcb.local_ack,
+                                }
+                            } else if seq_diff == 0 {
+                                // In-order segment
+                                tcb.local_ack = pkt_seq.wrapping_add(tcp_payload.len() as u32);
+                                
+                                // Collect this segment and any contiguous buffered segments
+                                let mut segments = vec![tcp_payload.to_vec()];
+                                
+                                // Check reorder buffer for contiguous segments
+                                while let Some(entry) = tcb.reorder_buffer.first_entry() {
+                                    if *entry.key() == tcb.local_ack {
+                                        let data = entry.remove();
+                                        tcb.local_ack = tcb.local_ack.wrapping_add(data.len() as u32);
+                                        tcb.reorder_buffer_bytes -= data.len();
+                                        segments.push(data);
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                
+                                if segments.len() == 1 {
+                                    TcpPacketAction::SendData {
+                                        seq: tcb.local_seq,
+                                        ack: tcb.local_ack,
+                                        data: segments.pop().unwrap(),
+                                        tx: tcb.tx_to_app.clone(),
+                                    }
+                                } else {
+                                    TcpPacketAction::SendMultipleData {
+                                        seq: tcb.local_seq,
+                                        ack: tcb.local_ack,
+                                        data_segments: segments,
+                                        tx: tcb.tx_to_app.clone(),
+                                    }
+                                }
+                            } else {
+                                // Out-of-order segment (seq > expected) - buffer it
+                                let data = tcp_payload.to_vec();
+                                
+                                // Check buffer size limit
+                                if tcb.reorder_buffer_bytes + data.len() <= tcb.max_reorder_buffer_bytes {
+                                    debug!("Buffering out-of-order TCP segment seq={} (expected={}), gap={}", 
+                                           pkt_seq, expected_seq, seq_diff);
+                                    tcb.reorder_buffer_bytes += data.len();
+                                    tcb.reorder_buffer.insert(pkt_seq, data);
+                                    
+                                    // Send duplicate ACK to trigger fast retransmit
+                                    TcpPacketAction::BufferedOutOfOrder {
+                                        seq: tcb.local_seq,
+                                        ack: tcb.local_ack, // ACK the last in-order byte
+                                    }
+                                } else {
+                                    warn!("Reorder buffer full, dropping out-of-order segment");
+                                    TcpPacketAction::SendAck {
+                                        seq: tcb.local_seq,
+                                        ack: tcb.local_ack,
+                                    }
+                                }
                             }
                         } else {
                             // Pure ACK - no action needed
@@ -461,6 +565,25 @@ impl VirtualStack {
                         tcb.state = TcpState::Closed;
                     }
                 }
+            }
+            TcpPacketAction::SendMultipleData { seq, ack, data_segments, tx } => {
+                // ACK all the data
+                self.send_tcp_packet(&conn_id, seq, ack, TcpFlags::ACK, &[]);
+                // Forward all segments to application in order
+                for data in data_segments {
+                    if tx.send(data).is_err() {
+                        warn!("TCP data channel disconnected for {:?}", conn_id);
+                        let mut conns = self.tcp_connections.lock();
+                        if let Some(tcb) = conns.get_mut(&conn_id) {
+                            tcb.state = TcpState::Closed;
+                        }
+                        break;
+                    }
+                }
+            }
+            TcpPacketAction::BufferedOutOfOrder { seq, ack } => {
+                // Send duplicate ACK to indicate gap (triggers fast retransmit on sender)
+                self.send_tcp_packet(&conn_id, seq, ack, TcpFlags::ACK, &[]);
             }
             TcpPacketAction::ConnectionEstablished { seq, ack } => {
                 // Send ACK to complete 3-way handshake

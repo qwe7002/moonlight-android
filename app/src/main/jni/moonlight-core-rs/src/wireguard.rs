@@ -496,6 +496,8 @@ impl WireGuardTunnel {
     /// Background thread: periodic timer for keepalive and handshake maintenance
     fn timer_loop(state: Arc<Mutex<TunnelState>>, running: Arc<AtomicBool>) {
         let mut dst_buf = vec![0u8; WG_BUFFER_SIZE];
+        let mut handshake_retry_count = 0u32;
+        const MAX_HANDSHAKE_RETRIES: u32 = 5;
 
         info!("WireGuard timer thread started");
 
@@ -503,17 +505,53 @@ impl WireGuardTunnel {
             thread::sleep(Duration::from_millis(250));
 
             let mut st = state.lock();
-            match st.tunnel.update_timers(&mut dst_buf) {
-                TunnResult::WriteToNetwork(data) => {
-                    if let Err(e) = st.endpoint_socket.send(data) {
-                        debug!("Failed to send timer packet: {}", e);
+            
+            // Process all timer events in a loop (there may be multiple)
+            loop {
+                match st.tunnel.update_timers(&mut dst_buf) {
+                    TunnResult::WriteToNetwork(data) => {
+                        if let Err(e) = st.endpoint_socket.send(data) {
+                            debug!("Failed to send timer packet: {}", e);
+                        }
                     }
+                    TunnResult::Err(e) => {
+                        warn!("WireGuard timer error: {:?}", e);
+                        
+                        // Check if this is a connection expired error
+                        let error_str = format!("{:?}", e);
+                        if error_str.contains("ConnectionExpired") {
+                            if handshake_retry_count < MAX_HANDSHAKE_RETRIES {
+                                handshake_retry_count += 1;
+                                warn!("Connection expired, re-initiating handshake (attempt {})", handshake_retry_count);
+                                
+                                // Mark handshake as not completed
+                                st.handshake_completed.store(false, Ordering::SeqCst);
+                                
+                                // Try to re-initiate handshake
+                                match st.tunnel.format_handshake_initiation(&mut dst_buf, false) {
+                                    TunnResult::WriteToNetwork(data) => {
+                                        if let Err(e) = st.endpoint_socket.send(data) {
+                                            warn!("Failed to send handshake re-initiation: {}", e);
+                                        } else {
+                                            info!("Sent handshake re-initiation");
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            } else {
+                                error!("WireGuard connection expired and max retries reached");
+                            }
+                        }
+                        break;
+                    }
+                    TunnResult::Done => break,
+                    _ => break,
                 }
-                TunnResult::Err(e) => {
-                    warn!("WireGuard timer error: {:?}", e);
-                }
-                TunnResult::Done => {}
-                _ => {}
+            }
+            
+            // Reset retry count if handshake is completed
+            if st.handshake_completed.load(Ordering::SeqCst) {
+                handshake_retry_count = 0;
             }
         }
 

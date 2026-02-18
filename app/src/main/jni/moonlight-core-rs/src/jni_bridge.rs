@@ -1618,27 +1618,30 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgCreateTcpProxy(
         }
     };
 
-    let target_sock_addr = std::net::SocketAddr::new(
-        std::net::IpAddr::V4(target_ip),
-        target_port as u16,
-    );
-
-    // Build WireGuard config
-    let config = crate::wireguard_config::WireGuardConfig {
+    // Build WireGuard HTTP config for the shared TCP proxy
+    // This allows the TCP proxy to route through the streaming tunnel when active
+    let wg_http_config = crate::wg_http::WgHttpConfig {
         private_key: private_key_bytes,
         peer_public_key: peer_public_key_bytes,
         preshared_key: psk_bytes,
         endpoint: endpoint_addr,
-        tunnel_address: std::net::IpAddr::V4(tunnel_ip),
+        tunnel_ip: tunnel_ip,
+        server_ip: target_ip,
         keepalive_secs: keepalive_secs as u16,
         mtu: mtu as u16,
     };
 
-    // Create TCP proxy - try to bind to the target port for transparent proxying
+    // Configure the shared HTTP/TCP proxy module
+    // This allows TCP proxy to route through the streaming WG tunnel when active
+    crate::wg_http::wg_http_set_config(wg_http_config);
+
+    // Create TCP proxy using the shared approach
+    // This routes through the streaming tunnel when active, avoiding WG session conflicts
     // (moonlight-common-c expects RTSP on port 47989/48010)
-    match crate::wireguard::create_tcp_proxy(config, target_sock_addr, Some(target_port as u16)) {
+    match crate::wg_http::wg_http_create_tcp_proxy(target_port as u16) {
         Ok(port) => {
-            info!("Created WireGuard TCP proxy on port {} -> {}", port, target_sock_addr);
+            info!("Created WireGuard TCP proxy on port {} -> {}:{} (via shared tunnel)", 
+                  port, target_ip, target_port);
             port as JInt
         }
         Err(e) => {
@@ -1654,8 +1657,10 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgStopTcpProxy(
     _env: JNIEnv,
     _clazz: JClass,
 ) {
+    // Stop both the old wireguard TCP proxy and the new wg_http proxies
     crate::wireguard::stop_tcp_proxy();
-    info!("WireGuard TCP proxy stopped");
+    crate::wg_http::wg_http_stop_tcp_proxies();
+    info!("WireGuard TCP proxies stopped");
 }
 
 /// Check if TCP proxy is running (MoonBridge.wgIsTcpProxyRunning)
@@ -1664,7 +1669,8 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgIsTcpProxyRunning
     _env: JNIEnv,
     _clazz: JClass,
 ) -> JBoolean {
-    if crate::wireguard::is_tcp_proxy_running() {
+    // Check both old and new proxy systems
+    if crate::wireguard::is_tcp_proxy_running() || crate::wg_http::wg_http_is_any_tcp_proxy_running() {
         JNI_TRUE
     } else {
         JNI_FALSE
@@ -1677,7 +1683,13 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgGetTcpProxyPort(
     _env: JNIEnv,
     _clazz: JClass,
 ) -> JInt {
-    crate::wireguard::get_tcp_proxy_port() as JInt
+    // Try new wg_http proxy first, fall back to old wireguard proxy
+    let port = crate::wg_http::wg_http_get_first_proxy_port();
+    if port > 0 {
+        port as JInt
+    } else {
+        crate::wireguard::get_tcp_proxy_port() as JInt
+    }
 }
 
 // ============================================================================

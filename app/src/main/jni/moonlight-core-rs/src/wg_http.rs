@@ -1034,6 +1034,9 @@ impl SharedTcpProxy {
     /// Background thread: WG keepalive and stale connection cleanup
     fn timer_loop(proxy: Arc<SharedTcpProxy>) {
         let mut buf = vec![0u8; 256];
+        let mut handshake_buf = vec![0u8; MAX_PACKET_SIZE];
+        let mut handshake_retry_count = 0u32;
+        const MAX_HANDSHAKE_RETRIES: u32 = 5;
 
         while proxy.running.load(Ordering::SeqCst) {
             thread::sleep(Duration::from_secs(1));
@@ -1048,9 +1051,33 @@ impl SharedTcpProxy {
                         TunnResult::WriteToNetwork(data) => {
                             proxy.endpoint_socket.send(data).ok();
                         }
+                        TunnResult::Err(e) => {
+                            let error_str = format!("{:?}", e);
+                            if error_str.contains("ConnectionExpired") {
+                                if handshake_retry_count < MAX_HANDSHAKE_RETRIES {
+                                    handshake_retry_count += 1;
+                                    warn!("WG TCP proxy: connection expired, re-initiating handshake (attempt {})", 
+                                          handshake_retry_count);
+                                    
+                                    // Try to re-initiate handshake
+                                    match tunnel.format_handshake_initiation(&mut handshake_buf, false) {
+                                        TunnResult::WriteToNetwork(data) => {
+                                            proxy.endpoint_socket.send(data).ok();
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            } else {
+                                debug!("WG TCP proxy timer error: {:?}", e);
+                            }
+                            break;
+                        }
                         _ => break,
                     }
                 }
+            } else {
+                // When streaming is active, reset retry count
+                handshake_retry_count = 0;
             }
 
             // Periodic stale connection cleanup (every ~15 seconds)
@@ -1226,6 +1253,24 @@ pub fn wg_http_get_proxy_port(target_port: u16) -> Option<u16> {
     info!("wg_http_get_proxy_port({}) = {:?}, proxies_exists={}", 
           target_port, result, proxies.is_some());
     result
+}
+
+/// Check if any TCP proxy is running
+pub fn wg_http_is_any_tcp_proxy_running() -> bool {
+    let proxies = TCP_PROXIES.lock();
+    proxies.as_ref().map_or(false, |map| {
+        map.values().any(|state| state.running.load(Ordering::SeqCst))
+    })
+}
+
+/// Get the first running TCP proxy's local port (for backwards compatibility)
+pub fn wg_http_get_first_proxy_port() -> u16 {
+    let proxies = TCP_PROXIES.lock();
+    proxies.as_ref().and_then(|map| {
+        map.values()
+            .find(|state| state.running.load(Ordering::SeqCst))
+            .map(|state| state.local_port)
+    }).unwrap_or(0)
 }
 
 /// Handle a single TCP connection through the shared WireGuard tunnel.

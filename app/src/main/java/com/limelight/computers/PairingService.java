@@ -664,8 +664,9 @@ public class PairingService extends Service {
      * Set up WireGuard direct HTTP and TCP proxy for pairing if enabled in preferences
      */
     private void setupWireGuardProxy() {
-        SharedPreferences wgPrefs = getSharedPreferences("wireguard_prefs", Context.MODE_PRIVATE);
+        SharedPreferences wgPrefs = getSharedPreferences("wireguard_config", Context.MODE_PRIVATE);
         boolean wgEnabled = wgPrefs.getBoolean("wg_enabled", false);
+        Log.i(TAG, "setupWireGuardProxy: wg_enabled=" + wgEnabled);
         
         if (!wgEnabled) {
             return;
@@ -675,7 +676,7 @@ public class PairingService extends Service {
         String wgPrivateKey = wgPrefs.getString("wg_private_key", "");
         String wgPeerPublicKey = wgPrefs.getString("wg_peer_public_key", "");
         String wgPresharedKey = wgPrefs.getString("wg_preshared_key", "");
-        String wgEndpoint = wgPrefs.getString("wg_endpoint", "");
+        String wgEndpoint = wgPrefs.getString("wg_peer_endpoint", "");
         String wgTunnelAddress = wgPrefs.getString("wg_tunnel_address", "10.0.0.2");
         
         if (wgServerAddress.isEmpty() || wgPrivateKey.isEmpty() || wgPeerPublicKey.isEmpty() || wgEndpoint.isEmpty()) {
