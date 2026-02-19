@@ -50,6 +50,8 @@ public class ComputerManagerService extends Service {
 
     // Track if we started WireGuard HTTP in this service
     private boolean wgHttpStartedByService = false;
+    // The HTTP config generation when we configured it, to detect external reconfiguration
+    private int wgHttpConfigGeneration = -1;
     private static final int OFFLINE_POLL_TRIES = 3;
     private static final int INITIAL_POLL_TRIES = 2;
     private static final int EMPTY_LIST_THRESHOLD = 3;
@@ -641,7 +643,8 @@ public class ComputerManagerService extends Service {
             // so we pass a placeholder IP. WgSocket connects to any target IP through the tunnel.
             if (WireGuardManager.configureHttp(wgConfig, "0.0.0.0")) {
                 wgHttpStartedByService = true;
-                Log.i(TAG, "WireGuard HTTP routing configured for polling");
+                wgHttpConfigGeneration = WireGuardManager.getHttpConfigGeneration();
+                Log.i(TAG, "WireGuard HTTP routing configured for polling (gen=" + wgHttpConfigGeneration + ")");
             } else {
                 Log.e(TAG, "Failed to configure WireGuard HTTP routing");
             }
@@ -655,9 +658,19 @@ public class ComputerManagerService extends Service {
      */
     private void teardownWireGuardHttp() {
         if (wgHttpStartedByService) {
-            WireGuardManager.clearHttpConfig();
+            // Only clear if the config is still ours (same generation).
+            // If Game.startWireGuard() reconfigured HTTP, the generation will differ
+            // and we must NOT clear it (that would kill Game's active session).
+            int currentGen = WireGuardManager.getHttpConfigGeneration();
+            if (currentGen == wgHttpConfigGeneration) {
+                WireGuardManager.clearHttpConfig();
+                Log.i(TAG, "WireGuard HTTP JNI torn down (gen=" + wgHttpConfigGeneration + ")");
+            } else {
+                Log.i(TAG, "Skipping WG HTTP teardown - config was reconfigured externally (our gen=" +
+                        wgHttpConfigGeneration + ", current gen=" + currentGen + ")");
+            }
             wgHttpStartedByService = false;
-            Log.i(TAG, "WireGuard HTTP JNI torn down");
+            wgHttpConfigGeneration = -1;
         }
     }
 

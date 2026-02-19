@@ -180,6 +180,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     private String host; // Saved for WireGuard lifecycle management
     private boolean wireGuardConfigured = false; // Track if WireGuard was set up
+    private boolean wireGuardStartedInCreate = false; // Prevent duplicate start from onStart
 
     // Static lock and generation counter to prevent race conditions between
     // stopConnection()'s background thread and startWireGuard() in a new activity.
@@ -582,6 +583,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
         // Setup WireGuard proxies if enabled
         startWireGuard();
+        wireGuardStartedInCreate = true;
 
         // Initialize the connection
         conn = new NvConnection(getApplicationContext(),
@@ -1155,7 +1157,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     protected void onStart() {
         super.onStart();
 
-        // Restart WireGuard tunnel when coming back from background
+        // Restart WireGuard tunnel when coming back from background.
+        // Skip if we just started it in onCreate() — onStart() always runs after onCreate(),
+        // and calling startWireGuard() again would destroy the tunnel we just created.
+        if (wireGuardStartedInCreate) {
+            wireGuardStartedInCreate = false;
+            return;
+        }
         if (wireGuardConfigured && !isFinishing()) {
             startWireGuard();
         }
@@ -1187,20 +1195,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
             Log.i(TAG, "Starting WireGuard for host: " + host);
             try {
-                // Build WireGuard config
-                WireGuardManager.Config wgConfig = new WireGuardManager.Config()
-                        .setPrivateKeyBase64(prefConfig.wgPrivateKey)
-                        .setPeerPublicKeyBase64(prefConfig.wgPeerPublicKey)
-                        .setPresharedKeyBase64(prefConfig.wgPresharedKey.isEmpty() ? null : prefConfig.wgPresharedKey)
-                        .setEndpoint(prefConfig.wgEndpoint)
-                        .setTunnelAddress(prefConfig.wgTunnelAddress);
-
-                // Configure WireGuard HTTP routing (OkHttp uses WgSocket)
-                if (WireGuardManager.configureHttp(wgConfig, host)) {
-                    Log.i(TAG, "WireGuard HTTP routing configured for " + host);
-                } else {
-                    Log.e(TAG, "Failed to configure direct WireGuard HTTP");
-                }
+                // IMPORTANT: Start the streaming WireGuard tunnel FIRST, before configuring
+                // HTTP. This ensures that when WgSocket connections are made (via OkHttp),
+                // the SharedTcpProxy sees an active streaming tunnel and routes through it
+                // instead of creating its own competing WG session with the same keys.
 
                 // Start WireGuard tunnel for native streaming
                 byte[] privateKey = MoonBridge.parseWireGuardKey(prefConfig.wgPrivateKey);
@@ -1213,7 +1211,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 String endpointHost = endpointParts[0];
                 int endpointPort = endpointParts.length > 1 ? Integer.parseInt(endpointParts[1]) : 51820;
 
-                // Start the global WireGuard tunnel
+                // Start the global WireGuard tunnel (blocks until handshake completes)
                 int wgResult = MoonBridge.wgStartTunnel(privateKey, peerPublicKey, presharedKey,
                         endpointHost, endpointPort, prefConfig.wgTunnelAddress, 25, 1420);
 
@@ -1228,6 +1226,22 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         Log.i(TAG, "Direct WireGuard routing enabled for " + host);
                     } else {
                         Log.e(TAG, "Failed to enable direct WireGuard routing");
+                    }
+
+                    // NOW configure HTTP routing (OkHttp uses WgSocket).
+                    // Since the streaming tunnel is active, the SharedTcpProxy will
+                    // route through it instead of creating its own WG tunnel.
+                    WireGuardManager.Config wgConfig = new WireGuardManager.Config()
+                            .setPrivateKeyBase64(prefConfig.wgPrivateKey)
+                            .setPeerPublicKeyBase64(prefConfig.wgPeerPublicKey)
+                            .setPresharedKeyBase64(prefConfig.wgPresharedKey.isEmpty() ? null : prefConfig.wgPresharedKey)
+                            .setEndpoint(prefConfig.wgEndpoint)
+                            .setTunnelAddress(prefConfig.wgTunnelAddress);
+
+                    if (WireGuardManager.configureHttp(wgConfig, host)) {
+                        Log.i(TAG, "WireGuard HTTP routing configured for " + host);
+                    } else {
+                        Log.e(TAG, "Failed to configure direct WireGuard HTTP");
                     }
                 } else {
                     Log.e(TAG, "Failed to start WireGuard tunnel: " + wgResult);

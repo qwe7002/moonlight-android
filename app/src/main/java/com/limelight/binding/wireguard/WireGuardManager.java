@@ -306,6 +306,20 @@ public class WireGuardManager {
     private static volatile String currentTunnelAddress = null;
 
     /**
+     * Generation counter for HTTP config. Incremented each time configureHttp() is called.
+     * Used by ComputerManagerService to detect if someone else reconfigured HTTP since
+     * the service last set it up, avoiding inadvertent teardown of another owner's config.
+     */
+    private static volatile int httpConfigGeneration = 0;
+
+    /**
+     * Get the current HTTP config generation counter.
+     */
+    public static int getHttpConfigGeneration() {
+        return httpConfigGeneration;
+    }
+
+    /**
      * Get the currently configured tunnel address.
      * @return The tunnel address (e.g. "10.0.0.2"), or null if not configured
      */
@@ -351,8 +365,9 @@ public class WireGuardManager {
 
             if (result) {
                 httpConfigured = true;
+                httpConfigGeneration++;
                 currentTunnelAddress = config.tunnelAddress;
-                Log.i(TAG, "WireGuard HTTP client configured, tunnel address: " + currentTunnelAddress);
+                Log.i(TAG, "WireGuard HTTP client configured, tunnel address: " + currentTunnelAddress + ", generation: " + httpConfigGeneration);
             }
             return result;
         } catch (Exception e) {

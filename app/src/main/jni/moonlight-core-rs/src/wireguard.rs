@@ -150,9 +150,11 @@ impl WireGuardTunnel {
 
     /// Stop the WireGuard tunnel.
     pub fn stop(&self) {
-        info!("Stopping WireGuard tunnel...");
-        self.running.store(false, Ordering::SeqCst);
-        info!("WireGuard tunnel stopped");
+        // Only log and act if actually running (avoids double-stop from Drop)
+        if self.running.swap(false, Ordering::SeqCst) {
+            info!("Stopping WireGuard tunnel...");
+            info!("WireGuard tunnel stopped");
+        }
     }
 
     /// Check if the tunnel is running and the handshake is completed.
