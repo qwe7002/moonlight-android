@@ -80,15 +80,14 @@ impl WireGuardTunnel {
         let peer_public_key = PublicKey::from(config.peer_public_key);
 
         // Create the boringtun tunnel
-        let tunnel = Tunn::new(
+        let tunnel = Box::new(Tunn::new(
             private_key,
             peer_public_key,
             config.preshared_key,
             None,
             0, // index
             None, // rate limiter
-        )
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        ));
 
         // Resolve endpoint dynamically for DDNS support
         let endpoint_addr = config.resolve_endpoint()?;
@@ -847,7 +846,7 @@ struct WgSendCache {
 }
 static WG_SEND_CACHE: Mutex<Option<WgSendCache>> = Mutex::new(None);
 
-/// Thread-local encode buffer to avoid per-packet heap allocation (~65KB).
+// Thread-local encode buffer to avoid per-packet heap allocation (~65KB).
 thread_local! {
     static ENCODE_BUF: RefCell<Vec<u8>> = RefCell::new(vec![0u8; WG_BUFFER_SIZE]);
 }
@@ -928,7 +927,7 @@ pub fn wg_send_ip_packet(packet: &[u8]) -> io::Result<()> {
         // then send directly from the buffer - zero allocation hot path.
         // The encrypted `data` slice borrows `buf` (not the lock), so we can
         // send while still in the match arm without copying.
-        let st = c.state.lock();
+        let mut st = c.state.lock();
         match st.tunnel.encapsulate(packet, &mut buf) {
             TunnResult::WriteToNetwork(data) => {
                 // Send directly from encode buffer - eliminates to_vec() heap allocation
@@ -974,7 +973,7 @@ pub fn wg_send_ip_packets_batch(packets: &[Vec<u8>]) -> io::Result<()> {
         let mut buf = buf_cell.borrow_mut();
         // Encrypt and send each packet under a single lock acquisition.
         // Sending directly from the encode buffer avoids per-packet to_vec() allocation.
-        let st = c.state.lock();
+        let mut st = c.state.lock();
         for pkt in packets {
             match st.tunnel.encapsulate(pkt, &mut buf) {
                 TunnResult::WriteToNetwork(data) => {

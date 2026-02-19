@@ -100,15 +100,14 @@ fn create_tunnel(config: &WgHttpConfig) -> io::Result<(Box<Tunn>, UdpSocket, Soc
     let private_key = StaticSecret::from(config.private_key);
     let peer_public_key = PublicKey::from(config.peer_public_key);
 
-    let tunnel = Tunn::new(
+    let tunnel = Box::new(Tunn::new(
         private_key,
         peer_public_key,
         config.preshared_key,
         None,
         0,
         None,
-    )
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Tunn::new failed: {}", e)))?;
+    ));
 
     // Resolve endpoint dynamically for DDNS support - get all addresses
     let addrs = resolve_endpoint_all(&config.endpoint)?;
@@ -396,15 +395,14 @@ impl SharedTcpProxy {
             // no network I/O) and a dummy loopback socket to satisfy the struct.
             let private_key = StaticSecret::from(config.private_key);
             let peer_public_key = PublicKey::from(config.peer_public_key);
-            let tun = Tunn::new(
+            let tun = Box::new(Tunn::new(
                 private_key,
                 peer_public_key,
                 config.preshared_key,
                 None,
                 0,
                 None,
-            )
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Tunn::new failed: {}", e)))?;
+            ));
 
             // Dummy socket — will never be used for real I/O
             let dummy_socket = UdpSocket::bind("127.0.0.1:0")?;
@@ -500,7 +498,7 @@ impl SharedTcpProxy {
             }
         } else {
             // Use our own tunnel
-            let tunnel = self.tunnel.lock();
+            let mut tunnel = self.tunnel.lock();
             let endpoint_socket = self.endpoint_socket.lock();
             let mut buf = vec![0u8; MAX_PACKET_SIZE + 200];
 
@@ -564,7 +562,7 @@ impl SharedTcpProxy {
                     // Decapsulate the WG packet(s)
                     let mut ip_packets = Vec::new();
                     {
-                        let tunnel = proxy.tunnel.lock();
+                        let mut tunnel = proxy.tunnel.lock();
                         let endpoint_socket = proxy.endpoint_socket.lock();
                         match tunnel.decapsulate(None, &recv_buf[..n], &mut dec_buf) {
                             TunnResult::WriteToTunnelV4(data, _)
@@ -682,7 +680,7 @@ impl SharedTcpProxy {
                         handshake_retry_count = 0;
 
                         // Initiate new handshake after endpoint change
-                        let tunnel = proxy.tunnel.lock();
+                        let mut tunnel = proxy.tunnel.lock();
                         let endpoint_socket = proxy.endpoint_socket.lock();
                         match tunnel.format_handshake_initiation(&mut handshake_buf, false) {
                             TunnResult::WriteToNetwork(data) => {
@@ -698,7 +696,7 @@ impl SharedTcpProxy {
 
                 // Update WG timers (handshake, etc.)
                 {
-                    let tunnel = proxy.tunnel.lock();
+                    let mut tunnel = proxy.tunnel.lock();
                     let endpoint_socket = proxy.endpoint_socket.lock();
                     loop {
                         match tunnel.update_timers(&mut buf) {
