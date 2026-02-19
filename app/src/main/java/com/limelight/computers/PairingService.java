@@ -632,7 +632,6 @@ public class PairingService extends Service {
             // Configure WireGuard HTTP routing (OkHttp uses WgSocket)
             // Use the target computer address for routing
             if (WireGuardManager.configureHttp(wgConfig, computerAddress)) {
-                NvHTTP.setUseDirectWgHttp(true);
                 wgProxyStarted = true;
                 Log.i(TAG, "WireGuard configured for pairing to " + computerAddress);
             } else {
@@ -650,7 +649,6 @@ public class PairingService extends Service {
         if (wgProxyStarted) {
             // Clear direct HTTP config
             WireGuardManager.clearHttpConfig();
-            NvHTTP.setUseDirectWgHttp(false);
             
             wgProxyStarted = false;
             Log.i(TAG, "WireGuard stopped after pairing");

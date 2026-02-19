@@ -21,12 +21,12 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, RecvTimeoutError};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 
 // ============================================================================
@@ -39,12 +39,18 @@ const DEFAULT_RECV_TIMEOUT_MS: u64 = 100;
 /// Channel buffer size - enough for ~1000 packets in flight
 const CHANNEL_BUFFER_SIZE: usize = 1024;
 
+/// Starting FD for virtual WG TCP sockets (high value to avoid conflicts)
+const WG_TCP_FD_BASE: i32 = 100000;
+
 // ============================================================================
 // Global WG routing state
 // ============================================================================
 
 /// Whether WG zero-copy routing is active
 static WG_ROUTING_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Counter for virtual WG TCP socket FDs
+static WG_TCP_FD_COUNTER: AtomicI32 = AtomicI32::new(WG_TCP_FD_BASE);
 
 /// WG routing configuration
 struct WgRoutingConfig {
@@ -68,8 +74,21 @@ struct WgUdpSocketInfo {
     remote_port: Mutex<Option<u16>>,
 }
 
+/// Per-socket WG information (TCP)
+/// Maps virtual FD to wg_socket handle
+struct WgTcpSocketInfo {
+    /// Handle returned by wg_socket_connect
+    wg_handle: u64,
+    /// Whether the connection is open
+    is_open: AtomicBool,
+}
+
 /// Map from socket FD → WG UDP socket info
 static WG_UDP_SOCKETS: LazyLock<Mutex<HashMap<i32, Arc<WgUdpSocketInfo>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Map from virtual FD → WG TCP socket info
+static WG_TCP_SOCKETS: LazyLock<Mutex<HashMap<i32, Arc<WgTcpSocketInfo>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Map from remote server port → channel sender
@@ -96,6 +115,17 @@ extern "C" {
 
     /// Original closeSocket from PlatformSockets.c (renamed via -D define)
     fn orig_closeSocket(s: i32);
+
+    /// Original connectTcpSocket from PlatformSockets.c (renamed via -D define)
+    fn orig_connectTcpSocket(
+        dstaddr: *mut libc::sockaddr_storage,
+        addrlen: libc::socklen_t,
+        port: libc::c_ushort,
+        timeoutSec: libc::c_int,
+    ) -> i32;
+
+    /// Original shutdownTcpSocket from PlatformSockets.c (renamed via -D define)
+    fn orig_shutdownTcpSocket(s: i32);
 }
 
 // ============================================================================
@@ -120,7 +150,10 @@ pub fn disable_wg_routing() {
     WG_ROUTING_ACTIVE.store(false, Ordering::SeqCst);
     WG_CONFIG.lock().take();
     WG_UDP_SOCKETS.lock().clear();
+    WG_TCP_SOCKETS.lock().clear();
     WG_PORT_SENDERS.lock().clear();
+    // Reset TCP FD counter
+    WG_TCP_FD_COUNTER.store(WG_TCP_FD_BASE, Ordering::SeqCst);
     info!("WG zero-copy routing disabled");
 }
 
@@ -262,7 +295,18 @@ pub unsafe extern "C" fn bindUdpSocket(
 /// WG-aware closeSocket: cleans up WG tracking before closing.
 #[no_mangle]
 pub unsafe extern "C" fn closeSocket(s: i32) {
-    // Clean up WG tracking if active
+    // Check if this is a WG TCP socket (virtual FD >= WG_TCP_FD_BASE)
+    if s >= WG_TCP_FD_BASE {
+        let removed = WG_TCP_SOCKETS.lock().remove(&s);
+        if let Some(info) = removed {
+            info.is_open.store(false, Ordering::SeqCst);
+            crate::wg_socket::wg_socket_close(info.wg_handle);
+            debug!("Closed WG TCP socket: virtual_fd={}, handle={}", s, info.wg_handle);
+        }
+        return; // Virtual FD, don't call orig_closeSocket
+    }
+
+    // Clean up WG UDP tracking if active
     if WG_ROUTING_ACTIVE.load(Ordering::Relaxed) {
         let removed = WG_UDP_SOCKETS.lock().remove(&s);
         if let Some(info) = removed {
@@ -270,7 +314,7 @@ pub unsafe extern "C" fn closeSocket(s: i32) {
             if let Some(remote_port) = *info.remote_port.lock() {
                 WG_PORT_SENDERS.lock().remove(&remote_port);
                 debug!(
-                    "Cleaned up WG zero-copy socket: fd={}, remote_port={}",
+                    "Cleaned up WG zero-copy UDP socket: fd={}, remote_port={}",
                     s, remote_port
                 );
             }
@@ -438,4 +482,213 @@ fn extract_addr_from_sockaddr(addr: *const libc::sockaddr) -> Option<(Ipv4Addr, 
             _ => None,
         }
     }
+}
+
+/// Extract IPv4 address from sockaddr_storage
+fn extract_ipv4_from_sockaddr_storage(addr: *const libc::sockaddr_storage) -> Option<Ipv4Addr> {
+    if addr.is_null() {
+        return None;
+    }
+    unsafe {
+        match (*addr).ss_family as i32 {
+            libc::AF_INET => {
+                let sin = &*(addr as *const libc::sockaddr_in);
+                let ip = Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr));
+                Some(ip)
+            }
+            libc::AF_INET6 => {
+                let sin6 = &*(addr as *const libc::sockaddr_in6);
+                let octets = sin6.sin6_addr.s6_addr;
+                // Check for v4-mapped v6 address
+                if octets[0..10] == [0; 10] && octets[10] == 0xff && octets[11] == 0xff {
+                    Some(Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15]))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+// ============================================================================
+// TCP Socket Wrappers (WireGuard-aware)
+// ============================================================================
+
+/// WG-aware connectTcpSocket: routes through WireGuard virtual TCP stack when active.
+///
+/// When WG routing is active and the destination is the WG server IP,
+/// creates a TCP connection through the WireGuard tunnel using the virtual stack.
+/// Returns a virtual FD (>= WG_TCP_FD_BASE) that can be used with send/recv.
+#[no_mangle]
+pub unsafe extern "C" fn connectTcpSocket(
+    dstaddr: *mut libc::sockaddr_storage,
+    addrlen: libc::socklen_t,
+    port: libc::c_ushort,
+    timeoutSec: libc::c_int,
+) -> i32 {
+    // Fast path: if WG routing not active, use original
+    if !WG_ROUTING_ACTIVE.load(Ordering::Relaxed) {
+        return orig_connectTcpSocket(dstaddr, addrlen, port, timeoutSec);
+    }
+
+    // Check if destination is the WG server
+    let dest_ip = match extract_ipv4_from_sockaddr_storage(dstaddr) {
+        Some(ip) => ip,
+        None => {
+            // IPv6 or invalid, use original
+            return orig_connectTcpSocket(dstaddr, addrlen, port, timeoutSec);
+        }
+    };
+
+    let config = WG_CONFIG.lock();
+    let is_wg_target = match config.as_ref() {
+        Some(cfg) => dest_ip == cfg.server_ip,
+        None => false,
+    };
+    drop(config);
+
+    if !is_wg_target {
+        // Not targeting WG server, use original
+        return orig_connectTcpSocket(dstaddr, addrlen, port, timeoutSec);
+    }
+
+    // Route through WireGuard virtual TCP stack
+    info!("connectTcpSocket: routing {}:{} through WireGuard", dest_ip, port);
+
+    let timeout_ms = (timeoutSec as u32) * 1000;
+    let host = dest_ip.to_string();
+    let handle = crate::wg_socket::wg_socket_connect(&host, port, timeout_ms);
+
+    if handle == 0 {
+        error!("connectTcpSocket: WG connection failed to {}:{}", dest_ip, port);
+        // Return INVALID_SOCKET (-1)
+        return -1;
+    }
+
+    // Allocate a virtual FD for this connection
+    let virtual_fd = WG_TCP_FD_COUNTER.fetch_add(1, Ordering::SeqCst);
+
+    let info = Arc::new(WgTcpSocketInfo {
+        wg_handle: handle,
+        is_open: AtomicBool::new(true),
+    });
+
+    WG_TCP_SOCKETS.lock().insert(virtual_fd, info);
+
+    info!(
+        "connectTcpSocket: WG TCP connection established, virtual_fd={}, handle={}",
+        virtual_fd, handle
+    );
+
+    virtual_fd
+}
+
+/// WG-aware shutdownTcpSocket: properly shuts down WG TCP connection.
+#[no_mangle]
+pub unsafe extern "C" fn shutdownTcpSocket(s: i32) {
+    // Check if this is a WG TCP socket
+    if s >= WG_TCP_FD_BASE {
+        let tcp_sockets = WG_TCP_SOCKETS.lock();
+        if let Some(info) = tcp_sockets.get(&s) {
+            info.is_open.store(false, Ordering::SeqCst);
+            // Note: actual close happens in closeSocket
+            debug!("shutdownTcpSocket: marked WG TCP socket {} for shutdown", s);
+        }
+        return;
+    }
+
+    // Real socket
+    orig_shutdownTcpSocket(s);
+}
+
+/// WG-aware TCP send: sends data through WireGuard virtual TCP stack.
+///
+/// This function is called via the `send` macro redirect in wg_intercept.h.
+#[no_mangle]
+pub unsafe extern "C" fn wg_tcp_send(
+    sockfd: libc::c_int,
+    buf: *const libc::c_void,
+    len: libc::size_t,
+    flags: libc::c_int,
+) -> libc::ssize_t {
+    // Check if this is a WG TCP socket
+    if sockfd >= WG_TCP_FD_BASE {
+        let tcp_info = {
+            let sockets = WG_TCP_SOCKETS.lock();
+            sockets.get(&sockfd).cloned()
+        };
+
+        if let Some(info) = tcp_info {
+            if !info.is_open.load(Ordering::Relaxed) {
+                // Socket was shut down
+                return -1;
+            }
+
+            let data = std::slice::from_raw_parts(buf as *const u8, len);
+            let result = crate::wg_socket::wg_socket_send(info.wg_handle, data);
+
+            if result < 0 {
+                error!("wg_tcp_send: send failed, handle={}, result={}", info.wg_handle, result);
+                return -1;
+            }
+
+            return result as libc::ssize_t;
+        } else {
+            error!("wg_tcp_send: invalid virtual FD {}", sockfd);
+            return -1;
+        }
+    }
+
+    // Regular socket, use libc send
+    libc::send(sockfd, buf, len, flags)
+}
+
+/// WG-aware TCP recv: receives data from WireGuard virtual TCP stack.
+///
+/// This function is called via the `recv` macro redirect in wg_intercept.h.
+#[no_mangle]
+pub unsafe extern "C" fn wg_tcp_recv(
+    sockfd: libc::c_int,
+    buf: *mut libc::c_void,
+    len: libc::size_t,
+    flags: libc::c_int,
+) -> libc::ssize_t {
+    // Check if this is a WG TCP socket
+    if sockfd >= WG_TCP_FD_BASE {
+        let tcp_info = {
+            let sockets = WG_TCP_SOCKETS.lock();
+            sockets.get(&sockfd).cloned()
+        };
+
+        if let Some(info) = tcp_info {
+            if !info.is_open.load(Ordering::Relaxed) {
+                // Socket was shut down
+                return 0; // EOF
+            }
+
+            let buffer = std::slice::from_raw_parts_mut(buf as *mut u8, len);
+            // Use a reasonable timeout for recv (e.g., 5 seconds)
+            let timeout_ms = 5000u32;
+            let result = crate::wg_socket::wg_socket_recv(info.wg_handle, buffer, timeout_ms);
+
+            if result == -2 {
+                // Timeout - for blocking recv, we should retry
+                // Set errno to EAGAIN and return -1
+                *libc::__errno() = libc::EAGAIN;
+                return -1;
+            } else if result < 0 {
+                error!("wg_tcp_recv: recv failed, handle={}, result={}", info.wg_handle, result);
+                return -1;
+            }
+
+            return result as libc::ssize_t;
+        } else {
+            error!("wg_tcp_recv: invalid virtual FD {}", sockfd);
+            return -1;
+        }
+    }
+
+    // Regular socket, use libc recv
+    libc::recv(sockfd, buf, len, flags)
 }

@@ -213,7 +213,9 @@ fn main() {
     // Build PlatformSockets.c separately with renamed key functions.
     // These renamed symbols (orig_*) are called by Rust zero-copy wrappers
     // in platform_sockets.rs when WG is not active or as fallback.
+    // Also force-include wg_intercept.h for send/recv redirection in sendMtuSafe().
     let src_dir = moonlight_common_c_dir.join("src");
+    let wg_intercept_header = manifest_dir.join("wg_intercept.h");
     let mut plat_build = cc::Build::new();
     plat_build
         .file(src_dir.join("PlatformSockets.c"))
@@ -225,9 +227,16 @@ fn main() {
         .define("HAVE_CLOCK_GETTIME", "1")
         // Rename key functions so Rust can provide WG-aware wrappers
         // while still calling the originals as fallback
+        // UDP functions
         .define("recvUdpSocket", "orig_recvUdpSocket")
         .define("bindUdpSocket", "orig_bindUdpSocket")
         .define("closeSocket", "orig_closeSocket")
+        // TCP functions
+        .define("connectTcpSocket", "orig_connectTcpSocket")
+        .define("shutdownTcpSocket", "orig_shutdownTcpSocket")
+        // Force-include WG interception header to redirect send/recv
+        .flag("-include")
+        .flag(wg_intercept_header.to_str().unwrap())
         .warnings(false);
     apply_common_settings(&mut plat_build);
     plat_build.compile("platform-sockets-orig");
@@ -235,9 +244,8 @@ fn main() {
     // Build moonlight-common-c library
     // - PlatformCrypto.c excluded: crypto handled by Rust ring crate
     // - PlatformSockets.c excluded: compiled separately above with renamed symbols;
-    //   Rust provides recvUdpSocket/bindUdpSocket/closeSocket (WG zero-copy wrappers)
-    // - wg_intercept.h force-included: redirects sendto → wg_sendto for zero-copy UDP send
-    let wg_intercept_header = manifest_dir.join("wg_intercept.h");
+    //   Rust provides recvUdpSocket/bindUdpSocket/closeSocket/connectTcpSocket/shutdownTcpSocket (WG wrappers)
+    // - wg_intercept.h force-included: redirects sendto/send/recv for WG routing
     let mut mlc_build = cc::Build::new();
     mlc_build
         .file(src_dir.join("AudioStream.c"))

@@ -70,18 +70,6 @@ public class NvHTTP {
     public static final int READ_TIMEOUT = 7000;
 
     /**
-     * Deprecated: No longer needed. WireGuard routing is now automatic when configured.
-     * Kept for API compatibility.
-     *
-     * @param enabled ignored
-     */
-    @Deprecated
-    public static void setUseDirectWgHttp(boolean enabled) {
-        // No-op: WireGuard routing is now automatic when isHttpConfigured() returns true
-        Log.i(TAG, "setUseDirectWgHttp() called with " + enabled + " (ignored - WireGuard routing is automatic)");
-    }
-
-    /**
      * Check if WireGuard HTTP routing is enabled and configured.
      * When WireGuard HTTP is configured, all HTTP requests will be routed through WireGuard.
      *

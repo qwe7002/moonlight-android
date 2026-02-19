@@ -586,7 +586,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
                 // Configure WireGuard HTTP routing (OkHttp uses WgSocket)
                 if (WireGuardManager.configureHttp(wgConfig, host)) {
-                    NvHTTP.setUseDirectWgHttp(true);
                     Log.i(TAG, "WireGuard HTTP routing configured for " + host);
                 } else {
                     Log.e(TAG, "Failed to configure direct WireGuard HTTP");
@@ -624,9 +623,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             } catch (Exception e) {
                 Log.e(TAG, "Failed to setup WireGuard proxies", e);
             }
-        } else {
-            // Clear any previous WireGuard settings
-            NvHTTP.setUseDirectWgHttp(false);
         }
 
         // Initialize the connection
@@ -2588,7 +2584,6 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     // Clear direct WireGuard HTTP config
                     if (WireGuardManager.isHttpConfigured()) {
                         WireGuardManager.clearHttpConfig();
-                        NvHTTP.setUseDirectWgHttp(false);
                         Log.i(TAG, "WireGuard direct HTTP cleared");
                     }
                     

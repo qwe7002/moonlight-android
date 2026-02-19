@@ -582,12 +582,44 @@ public class ComputerManagerService extends Service {
 
     /**
      * Configure WireGuard HTTP JNI for direct HTTP requests through the tunnel.
-     * Note: This requires a specific target address, so it's now a no-op.
-     * WireGuard HTTP is configured per-connection in Game.java and PairingService.
+     * This enables all HTTP polling requests to be routed through WireGuard.
      */
     private void configureWireGuardHttp() {
-        // WireGuard HTTP configuration removed - target address is now dynamic
-        // and configured per-connection in Game.java and PairingService
+        PreferenceConfiguration prefConfig = PreferenceConfiguration.readPreferences(this);
+        
+        if (!prefConfig.wgEnabled) {
+            Log.i(TAG, "WireGuard is not enabled, skipping HTTP configuration");
+            return;
+        }
+        
+        // Check if all required WireGuard settings are present
+        if (prefConfig.wgPrivateKey.isEmpty() || prefConfig.wgPeerPublicKey.isEmpty() || 
+            prefConfig.wgEndpoint.isEmpty() || prefConfig.wgTunnelAddress.isEmpty()) {
+            Log.w(TAG, "WireGuard settings incomplete, skipping HTTP configuration");
+            return;
+        }
+        
+        try {
+            // Build WireGuard config
+            WireGuardManager.Config wgConfig = new WireGuardManager.Config()
+                    .setPrivateKeyBase64(prefConfig.wgPrivateKey)
+                    .setPeerPublicKeyBase64(prefConfig.wgPeerPublicKey)
+                    .setPresharedKeyBase64(prefConfig.wgPresharedKey.isEmpty() ? null : prefConfig.wgPresharedKey)
+                    .setEndpoint(prefConfig.wgEndpoint)
+                    .setTunnelAddress(prefConfig.wgTunnelAddress);
+
+            // Configure WireGuard HTTP routing
+            // The serverAddress parameter is not actually used by the Rust implementation,
+            // so we pass a placeholder IP. WgSocket connects to any target IP through the tunnel.
+            if (WireGuardManager.configureHttp(wgConfig, "0.0.0.0")) {
+                wgHttpStartedByService = true;
+                Log.i(TAG, "WireGuard HTTP routing configured for polling");
+            } else {
+                Log.e(TAG, "Failed to configure WireGuard HTTP routing");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Exception configuring WireGuard HTTP", e);
+        }
     }
 
     /**
@@ -596,7 +628,6 @@ public class ComputerManagerService extends Service {
     private void teardownWireGuardHttp() {
         if (wgHttpStartedByService) {
             WireGuardManager.clearHttpConfig();
-            NvHTTP.setUseDirectWgHttp(false);
             wgHttpStartedByService = false;
             Log.i(TAG, "WireGuard HTTP JNI torn down");
         }
