@@ -28,6 +28,13 @@
  * Otherwise, falls through to real libc recvfrom. */
 #define recvfrom(s,b,l,f,a,al) wg_recvfrom(s,b,l,f,a,al)
 
+/* Redirect connect to WG-aware implementation for UDP sockets.
+ * For UDP sockets connecting to the WG server, we skip the real connect()
+ * (which would filter incoming packets by source) and store the peer address.
+ * This allows loopback-injected data to be received by the socket.
+ * For non-UDP or non-WG destinations, passes through to real libc connect. */
+#define connect(s,a,l) wg_udp_connect(s,a,l)
+
 /* ============================================================================
  * TCP interception
  * ============================================================================ */

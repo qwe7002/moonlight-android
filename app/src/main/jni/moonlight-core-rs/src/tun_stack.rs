@@ -16,11 +16,11 @@ use std::io;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use etherparse::{IpNumber, Ipv4Header, TcpHeader};
 use log::{debug, info, warn};
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 
 /// TCP connection state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +95,8 @@ enum TcpPacketAction {
     /// Out-of-order segment buffered, send duplicate ACK
     BufferedOutOfOrder { seq: u32, ack: u32 },
     ConnectionEstablished { seq: u32, ack: u32 },
+    /// Connection reset during handshake (notify waiters)
+    ConnectionReset,
     /// Signal EOF to the application (e.g., on RST or unexpected close)
     SignalEof { tx: mpsc::SyncSender<Vec<u8>> },
     None,
@@ -125,6 +127,10 @@ pub struct VirtualStack {
     next_seq: AtomicU32,
     /// Queued outgoing IP packets (to be sent through WireGuard)
     outgoing_packets: Mutex<Vec<Vec<u8>>>,
+    /// Condition variable for TCP state changes (notifies waiters when connection established/closed)
+    state_change_condvar: Condvar,
+    /// Mutex used with the condvar (parking_lot Condvar works with its own Mutex)
+    state_change_mutex: Mutex<()>,
 }
 
 impl VirtualStack {
@@ -136,7 +142,22 @@ impl VirtualStack {
             next_local_port: AtomicU16::new(49152),
             next_seq: AtomicU32::new(1_000_000),
             outgoing_packets: Mutex::new(Vec::new()),
+            state_change_condvar: Condvar::new(),
+            state_change_mutex: Mutex::new(()),
         }
+    }
+
+    /// Wait for a TCP connection state change with timeout.
+    /// Returns true if notified, false if timed out.
+    pub fn wait_for_state_change(&self, timeout: Duration) -> bool {
+        let mut guard = self.state_change_mutex.lock();
+        let result = self.state_change_condvar.wait_for(&mut guard, timeout);
+        !result.timed_out()
+    }
+
+    /// Notify all waiters that TCP state has changed
+    fn notify_state_change(&self) {
+        self.state_change_condvar.notify_all();
     }
 
     fn allocate_port(&self) -> u16 {
@@ -388,7 +409,7 @@ impl VirtualStack {
                             tcb.state = TcpState::Closed;
                             tcb.last_activity = Instant::now();
                             warn!("Connection reset during handshake");
-                            TcpPacketAction::None
+                            TcpPacketAction::ConnectionReset
                         } else {
                             TcpPacketAction::None
                         }
@@ -775,6 +796,12 @@ impl VirtualStack {
                     "TCP connection established to {}:{}",
                     conn_id.remote_addr, conn_id.remote_port
                 );
+                // Notify waiters (e.g., wg_socket_connect polling loop)
+                self.notify_state_change();
+            }
+            TcpPacketAction::ConnectionReset => {
+                // Notify waiters that connection was reset
+                self.notify_state_change();
             }
             TcpPacketAction::None => {}
         }

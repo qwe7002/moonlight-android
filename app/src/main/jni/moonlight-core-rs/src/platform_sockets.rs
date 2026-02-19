@@ -121,6 +121,12 @@ static WG_INJECT_PORT_MAP: LazyLock<Mutex<HashMap<u16, u16>>> =
 /// Global inject socket FD (used to send data to local sockets via loopback)
 static WG_INJECT_FD: Mutex<Option<i32>> = Mutex::new(None);
 
+/// Map from socket FD → virtually connected peer address.
+/// Used to track UDP sockets that called connect() to the WG server.
+/// We skip the real connect() so the socket can receive loopback-injected data.
+static WG_UDP_CONNECTED_PEERS: LazyLock<Mutex<HashMap<i32, SocketAddr>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 // ============================================================================
 // External C functions from PlatformSockets.c (compiled with renamed symbols)
 // ============================================================================
@@ -182,6 +188,7 @@ pub fn disable_wg_routing() {
     WG_PORT_SENDERS.lock().clear();
     WG_INJECT_SOCKETS.lock().clear();
     WG_INJECT_PORT_MAP.lock().clear();
+    WG_UDP_CONNECTED_PEERS.lock().clear();
     // Close inject socket
     if let Some(fd) = WG_INJECT_FD.lock().take() {
         unsafe { libc::close(fd); }
@@ -353,6 +360,12 @@ pub unsafe extern "C" fn closeSocket(s: i32) {
                 );
             }
         }
+        
+        // Clean up inject-mode socket tracking
+        WG_INJECT_SOCKETS.lock().remove(&s);
+        
+        // Clean up virtual UDP connection tracking
+        WG_UDP_CONNECTED_PEERS.lock().remove(&s);
     }
 
     // Close the real socket
@@ -598,11 +611,30 @@ pub unsafe extern "C" fn wg_sendto(
     }
 
     // Extract destination IP and port first (before socket lookup)
-    let (dest_ip, dest_port) = match extract_addr_from_sockaddr(dest_addr) {
-        Some(addr) => addr,
-        None => {
-            debug!("wg_sendto: fd={}, len={}, could not extract addr, fallback to real sendto", sockfd, len);
+    // If dest_addr is NULL, check if we have a virtually connected peer
+    let (dest_ip, dest_port) = if dest_addr.is_null() {
+        // Check for virtually connected socket (we intercepted connect())
+        let connected_peers = WG_UDP_CONNECTED_PEERS.lock();
+        if let Some(peer) = connected_peers.get(&sockfd) {
+            match peer.ip() {
+                IpAddr::V4(ip) => (ip, peer.port()),
+                IpAddr::V6(_) => {
+                    drop(connected_peers);
+                    return libc::sendto(sockfd, buf, len, flags, dest_addr, addrlen);
+                }
+            }
+        } else {
+            drop(connected_peers);
+            // No virtual connection, pass through
             return libc::sendto(sockfd, buf, len, flags, dest_addr, addrlen);
+        }
+    } else {
+        match extract_addr_from_sockaddr(dest_addr) {
+            Some(addr) => addr,
+            None => {
+                debug!("wg_sendto: fd={}, len={}, could not extract addr, fallback to real sendto", sockfd, len);
+                return libc::sendto(sockfd, buf, len, flags, dest_addr, addrlen);
+            }
         }
     };
 
@@ -1121,4 +1153,75 @@ pub unsafe extern "C" fn wg_tcp_recv(
 
     // Regular socket, use libc recv
     libc::recv(sockfd, buf, len, flags)
+}
+
+// ============================================================================
+// UDP connect interception
+// ============================================================================
+
+/// WG-aware UDP connect: intercepts connect() on UDP sockets.
+///
+/// When a UDP socket calls connect() to the WG server IP:
+/// - We skip the real connect() call (which would filter incoming packets by source)
+/// - Store the peer address in WG_UDP_CONNECTED_PEERS for use by wg_sendto
+///
+/// This allows loopback-injected data to be received by the socket.
+/// For non-WG destinations, we pass through to the real connect().
+#[no_mangle]
+pub unsafe extern "C" fn wg_udp_connect(
+    sockfd: libc::c_int,
+    addr: *const libc::sockaddr,
+    addrlen: libc::socklen_t,
+) -> libc::c_int {
+    // Check if WG routing is active
+    if !WG_ROUTING_ACTIVE.load(Ordering::Relaxed) {
+        return libc::connect(sockfd, addr, addrlen);
+    }
+
+    // Check socket type - only intercept UDP (SOCK_DGRAM)
+    let mut sock_type: libc::c_int = 0;
+    let mut optlen: libc::socklen_t = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    if libc::getsockopt(sockfd, libc::SOL_SOCKET, libc::SO_TYPE, 
+                        &mut sock_type as *mut _ as *mut libc::c_void, &mut optlen) != 0 {
+        return libc::connect(sockfd, addr, addrlen);
+    }
+
+    if sock_type != libc::SOCK_DGRAM {
+        // Not a UDP socket, pass through to real connect
+        return libc::connect(sockfd, addr, addrlen);
+    }
+
+    // Extract destination address
+    let peer_addr = match extract_addr_from_sockaddr(addr) {
+        Some((ip, port)) => SocketAddr::new(IpAddr::V4(ip), port),
+        None => {
+            // Can't extract address, pass through
+            return libc::connect(sockfd, addr, addrlen);
+        }
+    };
+
+    // Check if this is the WG server IP
+    let config = WG_CONFIG.lock();
+    let server_ip = match config.as_ref() {
+        Some(cfg) => cfg.server_ip,
+        None => {
+            drop(config);
+            return libc::connect(sockfd, addr, addrlen);
+        }
+    };
+    drop(config);
+
+    if let IpAddr::V4(dest_ip) = peer_addr.ip() {
+        if dest_ip == server_ip {
+            // This is a UDP connect() to the WG server!
+            // Store the peer address, skip the real connect()
+            WG_UDP_CONNECTED_PEERS.lock().insert(sockfd, peer_addr);
+            info!("wg_udp_connect: intercepted connect() to WG server fd={}, peer={}",
+                  sockfd, peer_addr);
+            return 0; // Success, but socket remains unconnected
+        }
+    }
+
+    // Not WG server, pass through to real connect
+    libc::connect(sockfd, addr, addrlen)
 }

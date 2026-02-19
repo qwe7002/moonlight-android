@@ -115,7 +115,8 @@ pub fn wg_socket_connect(host: &str, port: u16, timeout_ms: u32) -> u64 {
     let start = Instant::now();
 
     while !proxy.virtual_stack.is_tcp_established(&conn_id) {
-        if start.elapsed() > connect_timeout {
+        let remaining = connect_timeout.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
             let state = proxy.virtual_stack.get_tcp_state(&conn_id);
             warn!("wg_socket_connect: timeout after {:?}, state: {:?}", start.elapsed(), state);
             proxy.virtual_stack.remove_tcp_connection(&conn_id);
@@ -132,7 +133,9 @@ pub fn wg_socket_connect(host: &str, port: u16, timeout_ms: u32) -> u64 {
             _ => {}
         }
 
-        std::thread::sleep(Duration::from_millis(1));
+        // Wait for state change notification (with short timeout for safety)
+        let wait_time = remaining.min(Duration::from_millis(100));
+        proxy.virtual_stack.wait_for_state_change(wait_time);
     }
 
     // Connection established - create handle
