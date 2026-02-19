@@ -939,8 +939,35 @@ pub fn wg_send_ip_packet(packet: &[u8]) -> io::Result<()> {
                 result.map(|_| ())
             }
             TunnResult::Done => {
-                drop(st);
-                Ok(())
+                // encapsulate() returned Done — the tunnel has no active session keys
+                // (e.g., right after handshake completion before timers flush, or
+                // during a re-key transition). Flush pending timer events to advance
+                // the tunnel state machine, then retry once.
+                debug!("encapsulate returned Done, flushing timers and retrying");
+                loop {
+                    match st.tunnel.update_timers(&mut buf) {
+                        TunnResult::WriteToNetwork(data) => {
+                            c.send_socket.send(data).ok();
+                        }
+                        _ => break,
+                    }
+                }
+                // Retry encapsulate after timer flush
+                match st.tunnel.encapsulate(packet, &mut buf) {
+                    TunnResult::WriteToNetwork(data) => {
+                        let result = c.send_socket.send(data);
+                        drop(st);
+                        result.map(|_| ())
+                    }
+                    _ => {
+                        drop(st);
+                        warn!("encapsulate returned Done after timer flush — packet dropped");
+                        Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "WireGuard tunnel not ready (no session keys)",
+                        ))
+                    }
+                }
             }
             TunnResult::Err(e) => {
                 drop(st);
@@ -974,6 +1001,7 @@ pub fn wg_send_ip_packets_batch(packets: &[Vec<u8>]) -> io::Result<()> {
         // Encrypt and send each packet under a single lock acquisition.
         // Sending directly from the encode buffer avoids per-packet to_vec() allocation.
         let mut st = c.state.lock();
+        let mut timer_flushed = false;
         for pkt in packets {
             match st.tunnel.encapsulate(pkt, &mut buf) {
                 TunnResult::WriteToNetwork(data) => {
@@ -981,7 +1009,34 @@ pub fn wg_send_ip_packets_batch(packets: &[Vec<u8>]) -> io::Result<()> {
                         warn!("Batch send error: {}", e);
                     }
                 }
-                TunnResult::Done => {}
+                TunnResult::Done => {
+                    // Flush timers once per batch to advance tunnel state,
+                    // then retry this packet.
+                    if !timer_flushed {
+                        timer_flushed = true;
+                        loop {
+                            match st.tunnel.update_timers(&mut buf) {
+                                TunnResult::WriteToNetwork(data) => {
+                                    c.send_socket.send(data).ok();
+                                }
+                                _ => break,
+                            }
+                        }
+                        // Retry after timer flush
+                        match st.tunnel.encapsulate(pkt, &mut buf) {
+                            TunnResult::WriteToNetwork(data) => {
+                                if let Err(e) = c.send_socket.send(data) {
+                                    warn!("Batch send error (retry): {}", e);
+                                }
+                            }
+                            _ => {
+                                warn!("Batch encapsulate: packet dropped (no session keys)");
+                            }
+                        }
+                    } else {
+                        warn!("Batch encapsulate: packet dropped (no session keys)");
+                    }
+                }
                 TunnResult::Err(e) => {
                     warn!("Batch encapsulate error: {:?}", e);
                 }

@@ -371,7 +371,13 @@ pub unsafe extern "C" fn closeSocket(s: i32) {
         }
         
         // Clean up inject-mode socket tracking
-        WG_INJECT_SOCKETS.lock().remove(&s);
+        if let Some(info) = WG_INJECT_SOCKETS.lock().remove(&s) {
+            // Also clean up the port map entry to prevent stale mappings
+            // from capturing packets intended for a future socket on the
+            // same remote port (e.g., ENet reconnection to port 47999).
+            WG_INJECT_PORT_MAP.lock().remove(&info.remote_port);
+            debug!("Cleaned up inject socket: fd={}, remote_port={}", s, info.remote_port);
+        }
         
         // Clean up virtual UDP connection tracking
         WG_UDP_CONNECTED_PEERS.lock().remove(&s);

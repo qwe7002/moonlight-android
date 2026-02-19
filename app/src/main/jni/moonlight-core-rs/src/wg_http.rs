@@ -501,12 +501,32 @@ impl SharedTcpProxy {
             let mut tunnel = self.tunnel.lock();
             let endpoint_socket = self.endpoint_socket.lock();
             let mut buf = vec![0u8; MAX_PACKET_SIZE + 200];
+            let mut timer_flushed = false;
 
             for packet in &packets {
                 match tunnel.encapsulate(packet, &mut buf) {
                     TunnResult::WriteToNetwork(data) => {
                         if let Err(e) = endpoint_socket.send(data) {
                             warn!("WG TCP proxy: send failed: {}", e);
+                        }
+                    }
+                    TunnResult::Done => {
+                        // Flush timers once to advance tunnel state, then retry
+                        if !timer_flushed {
+                            timer_flushed = true;
+                            loop {
+                                match tunnel.update_timers(&mut buf) {
+                                    TunnResult::WriteToNetwork(data) => {
+                                        endpoint_socket.send(data).ok();
+                                    }
+                                    _ => break,
+                                }
+                            }
+                            if let TunnResult::WriteToNetwork(data) = tunnel.encapsulate(packet, &mut buf) {
+                                if let Err(e) = endpoint_socket.send(data) {
+                                    warn!("WG TCP proxy: send failed (retry): {}", e);
+                                }
+                            }
                         }
                     }
                     TunnResult::Err(e) => {
