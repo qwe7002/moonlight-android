@@ -192,10 +192,12 @@ public class ComputerManagerService extends Service {
             // Set the listener
             ComputerManagerService.this.listener = listener;
 
-            // Reconfigure WireGuard HTTP JNI to ensure a fresh socket
-            // after the app may have been backgrounded
-            teardownWireGuardHttp();
-            configureWireGuardHttp();
+            // Configure WireGuard HTTP JNI if not already active.
+            // onUnbind() tears it down when polling stops, so we need
+            // to re-create a fresh socket when polling resumes.
+            if (!wgHttpStartedByService) {
+                configureWireGuardHttp();
+            }
 
             // Start mDNS autodiscovery only if enabled in settings
             if (PreferenceConfiguration.isMdnsEnabled(ComputerManagerService.this)) {
@@ -342,6 +344,10 @@ public class ComputerManagerService extends Service {
 
         // Remove the listener
         listener = null;
+
+        // Teardown WireGuard HTTP JNI so the socket is released while
+        // polling is inactive. startPolling() will create a fresh one.
+        teardownWireGuardHttp();
 
         return false;
     }
