@@ -105,7 +105,7 @@ static WG_PORT_SENDERS: LazyLock<Mutex<HashMap<u16, SyncSender<Vec<u8>>>>> =
 /// Incoming WG data is injected to the real socket via loopback sendto.
 #[derive(Clone, Copy)]
 struct WgInjectSocketInfo {
-    local_port: u16,
+    _local_port: u16,
     remote_ip: Ipv4Addr,
     remote_port: u16,
 }
@@ -698,7 +698,7 @@ pub unsafe extern "C" fn wg_sendto(
         let mut inject_sockets = WG_INJECT_SOCKETS.lock();
         if !inject_sockets.contains_key(&sockfd) {
             inject_sockets.insert(sockfd, WgInjectSocketInfo {
-                local_port: lp,
+                _local_port: lp,
                 remote_ip: server_ip,
                 remote_port: dest_port,
             });

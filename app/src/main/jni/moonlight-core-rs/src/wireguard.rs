@@ -40,6 +40,18 @@ const MAX_UDP_PACKET_SIZE: usize = 65535;
 /// Buffer size for WireGuard encapsulation overhead
 const WG_BUFFER_SIZE: usize = MAX_UDP_PACKET_SIZE + 256;
 
+/// DDNS re-resolution timeout in seconds (same as WireGuard's reresolve-dns.sh)
+const DDNS_RERESOLVE_TIMEOUT_SECS: u64 = 135;
+
+/// Return the unspecified bind address matching the address family of `addr`.
+/// IPv4 endpoints bind to `0.0.0.0:0`, IPv6 endpoints bind to `[::]:0`.
+fn bind_addr_for(addr: &SocketAddr) -> &'static str {
+    match addr {
+        SocketAddr::V4(_) => "0.0.0.0:0",
+        SocketAddr::V6(_) => "[::]:0",
+    }
+}
+
 
 /// State of the WireGuard tunnel
 struct TunnelState {
@@ -47,12 +59,12 @@ struct TunnelState {
     tunnel: Box<Tunn>,
     /// UDP socket connected to the WireGuard endpoint
     endpoint_socket: UdpSocket,
+    /// Currently resolved endpoint address
+    resolved_endpoint: SocketAddr,
     /// Whether the tunnel is established (handshake completed)
     handshake_completed: AtomicBool,
-    /// Reusable buffer for encoding
-    encode_buf: Vec<u8>,
-    /// Reusable buffer for decoding
-    decode_buf: Vec<u8>,
+    /// Last successful handshake/packet timestamp for DDNS re-resolution
+    last_handshake: Instant,
 }
 
 /// The WireGuard tunnel manager
@@ -82,9 +94,13 @@ impl WireGuardTunnel {
         )
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-        // Create UDP socket to the WireGuard endpoint
-        let endpoint_socket = UdpSocket::bind("0.0.0.0:0")?;
-        endpoint_socket.connect(config.endpoint)?;
+        // Resolve endpoint dynamically for DDNS support
+        let endpoint_addr = config.resolve_endpoint()?;
+        info!("Resolved endpoint '{}' -> {}", config.endpoint, endpoint_addr);
+
+        // Create UDP socket to the WireGuard endpoint (address family must match)
+        let endpoint_socket = UdpSocket::bind(bind_addr_for(&endpoint_addr))?;
+        endpoint_socket.connect(endpoint_addr)?;
         endpoint_socket.set_nonblocking(false)?;
 
         // Set a short read timeout for timer/handshake operations
@@ -96,9 +112,9 @@ impl WireGuardTunnel {
         let state = Arc::new(Mutex::new(TunnelState {
             tunnel,
             endpoint_socket,
+            resolved_endpoint: endpoint_addr,
             handshake_completed: AtomicBool::new(false),
-            encode_buf: vec![0u8; WG_BUFFER_SIZE],
-            decode_buf: vec![0u8; WG_BUFFER_SIZE],
+            last_handshake: Instant::now(),
         }));
 
         let running = Arc::new(AtomicBool::new(false));
@@ -137,11 +153,12 @@ impl WireGuardTunnel {
         // Start the timer thread for keepalive and handshake retransmission
         let state = self.state.clone();
         let running = self.running.clone();
+        let config = self.config.clone();
 
         thread::Builder::new()
             .name("wg-timer".into())
             .spawn(move || {
-                Self::timer_loop(state, running);
+                Self::timer_loop(state, running, config);
             })?;
 
         info!("WireGuard tunnel started");
@@ -199,6 +216,7 @@ impl WireGuardTunnel {
 
     /// Send encapsulated data through the WireGuard tunnel.
     /// Encapsulates under lock (fast crypto), then sends outside lock.
+    #[allow(dead_code)]
     fn send_through_tunnel(state: &Arc<Mutex<TunnelState>>, payload: &[u8], src_addr: SocketAddr, dst_addr: SocketAddr) -> io::Result<()> {
         // Build an IP/UDP packet wrapping the payload
         let ip_packet = build_udp_ip_packet(src_addr, dst_addr, payload);
@@ -268,6 +286,10 @@ impl WireGuardTunnel {
 
             // Lock briefly for decapsulate only (fast crypto operation, ~microseconds)
             let mut st = state.lock();
+
+            // Update last handshake time on any received packet
+            st.last_handshake = Instant::now();
+
             let result = st.tunnel.decapsulate(None, &recv_buf[..n], &mut dec_buf);
 
             match result {
@@ -343,8 +365,8 @@ impl WireGuardTunnel {
         info!("WireGuard endpoint receiver stopped");
     }
 
-    /// Background thread: periodic timer for keepalive and handshake maintenance
-    fn timer_loop(state: Arc<Mutex<TunnelState>>, running: Arc<AtomicBool>) {
+    /// Background thread: periodic timer for keepalive, DDNS re-resolution, and handshake maintenance
+    fn timer_loop(state: Arc<Mutex<TunnelState>>, running: Arc<AtomicBool>, config: WireGuardConfig) {
         let mut dst_buf = vec![0u8; WG_BUFFER_SIZE];
         let mut handshake_retry_count = 0u32;
         const MAX_HANDSHAKE_RETRIES: u32 = 5;
@@ -356,6 +378,71 @@ impl WireGuardTunnel {
 
             let mut st = state.lock();
             
+            // Check for DDNS re-resolution (same as WireGuard's reresolve-dns.sh)
+            // If no successful packet in DDNS_RERESOLVE_TIMEOUT_SECS, re-resolve DNS
+            let last_handshake_elapsed = st.last_handshake.elapsed();
+            if last_handshake_elapsed > Duration::from_secs(DDNS_RERESOLVE_TIMEOUT_SECS) {
+                info!("DDNS: no handshake for {} seconds, re-resolving endpoint",
+                      last_handshake_elapsed.as_secs());
+
+                match config.resolve_endpoint() {
+                    Ok(new_addr) => {
+                        if new_addr != st.resolved_endpoint {
+                            info!("DDNS re-resolution: endpoint '{}' changed {} -> {}",
+                                  config.endpoint, st.resolved_endpoint, new_addr);
+
+                            // Create new socket and connect to new address (address family must match)
+                            match UdpSocket::bind(bind_addr_for(&new_addr)) {
+                                Ok(new_socket) => {
+                                    if let Err(e) = new_socket.connect(new_addr) {
+                                        warn!("DDNS: failed to connect to new endpoint: {}", e);
+                                    } else {
+                                        new_socket.set_nonblocking(false).ok();
+                                        new_socket.set_read_timeout(Some(Duration::from_millis(10))).ok();
+
+                                        // Replace socket and address
+                                        st.endpoint_socket = new_socket;
+                                        st.resolved_endpoint = new_addr;
+
+                                        info!("DDNS: reconnected to new endpoint {}", new_addr);
+
+                                        // Reset handshake state and retry count
+                                        st.handshake_completed.store(false, Ordering::SeqCst);
+                                        handshake_retry_count = 0;
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("DDNS: failed to create new socket: {}", e);
+                                }
+                            }
+                        } else {
+                            debug!("DDNS re-resolution: endpoint '{}' unchanged ({})",
+                                   config.endpoint, new_addr);
+                        }
+
+                        // Update last handshake time to prevent immediate re-resolution loop
+                        st.last_handshake = Instant::now();
+
+                        // Initiate new handshake
+                        match st.tunnel.format_handshake_initiation(&mut dst_buf, false) {
+                            TunnResult::WriteToNetwork(data) => {
+                                if let Err(e) = st.endpoint_socket.send(data) {
+                                    warn!("DDNS: failed to send handshake: {}", e);
+                                } else {
+                                    info!("DDNS: initiated handshake after re-resolution");
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Err(e) => {
+                        warn!("DDNS re-resolution failed: {}", e);
+                        // Still update timestamp to prevent rapid retry loop
+                        st.last_handshake = Instant::now();
+                    }
+                }
+            }
+
             // Process all timer events in a loop (there may be multiple)
             loop {
                 match st.tunnel.update_timers(&mut dst_buf) {
@@ -535,11 +622,8 @@ fn parse_udp_from_ip_packet(packet: &[u8]) -> Option<(u16, u16, &[u8])> {
 // TCP Proxy Implementation using smoltcp
 // ============================================================================
 
-/// Buffer size for TCP socket buffers  
-const TCP_RX_BUFFER_SIZE: usize = 65535;
-const TCP_TX_BUFFER_SIZE: usize = 65535;
-
 /// A virtual network device that sends/receives through WireGuard
+#[allow(dead_code)]
 struct WgDevice {
     /// Packets to be transmitted (from smoltcp to WireGuard)
     tx_queue: Vec<Vec<u8>>,
@@ -549,6 +633,7 @@ struct WgDevice {
     mtu: usize,
 }
 
+#[allow(dead_code)]
 impl WgDevice {
     fn new(mtu: usize) -> Self {
         WgDevice {
@@ -567,6 +652,7 @@ impl WgDevice {
     }
 }
 
+#[allow(dead_code)]
 struct WgRxToken {
     buffer: Vec<u8>,
 }
@@ -580,6 +666,7 @@ impl RxToken for WgRxToken {
     }
 }
 
+#[allow(dead_code)]
 struct WgTxToken<'a> {
     tx_queue: &'a mut Vec<Vec<u8>>,
 }

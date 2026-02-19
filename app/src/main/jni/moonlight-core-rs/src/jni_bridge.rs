@@ -1128,14 +1128,6 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgStartTunnel(
     unsafe { jni_release_string_utf_chars(env, tunnel_addr, tunnel_str) };
 
     // Parse addresses
-    let endpoint_ip: std::net::IpAddr = match endpoint_addr_str.parse() {
-        Ok(ip) => ip,
-        Err(e) => {
-            error!("wgStartTunnel: invalid endpoint address '{}': {}", endpoint_addr_str, e);
-            return -3;
-        }
-    };
-
     let tunnel_ip: std::net::IpAddr = match tunnel_addr_str.parse() {
         Ok(ip) => ip,
         Err(e) => {
@@ -1144,13 +1136,15 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgStartTunnel(
         }
     };
 
-    let endpoint = std::net::SocketAddr::new(endpoint_ip, endpoint_port as u16);
+    // Construct endpoint string (host:port) for dynamic DNS resolution
+    let endpoint_str = format!("{}:{}", endpoint_addr_str, endpoint_port);
+    info!("wgStartTunnel: endpoint '{}' will be resolved dynamically", endpoint_str);
 
     let config = crate::wireguard::WireGuardConfig {
         private_key: priv_key,
         peer_public_key: pub_key,
         preshared_key: psk,
-        endpoint,
+        endpoint: endpoint_str,
         tunnel_address: tunnel_ip,
         keepalive_secs: keepalive_secs as u16,
         mtu: mtu as u16,
@@ -1310,24 +1304,12 @@ pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeSt
         }
     };
 
-    // Parse endpoint (supports both IP:port and hostname:port via DNS resolution)
-    use std::net::ToSocketAddrs;
-    let endpoint_addr: std::net::SocketAddr = match endpoint_str.to_socket_addrs() {
-        Ok(mut addrs) => match addrs.next() {
-            Some(addr) => {
-                info!("nativeStartTunnel: resolved endpoint '{}' -> {}", endpoint_str, addr);
-                addr
-            }
-            None => {
-                error!("nativeStartTunnel: DNS resolution returned no addresses for '{}'", endpoint_str);
-                return JNI_FALSE;
-            }
-        },
-        Err(e) => {
-            error!("nativeStartTunnel: failed to resolve endpoint '{}': {}", endpoint_str, e);
-            return JNI_FALSE;
-        }
-    };
+    // Validate endpoint format (host:port)
+    if !endpoint_str.contains(':') {
+        error!("nativeStartTunnel: invalid endpoint format '{}' (expected host:port)", endpoint_str);
+        return JNI_FALSE;
+    }
+    info!("nativeStartTunnel: endpoint '{}' will be resolved dynamically on each connection", endpoint_str);
 
     // Parse tunnel address
     let tunnel_ip: std::net::IpAddr = match tunnel_addr_str.parse() {
@@ -1338,12 +1320,12 @@ pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeSt
         }
     };
 
-    // Build config
+    // Build config - endpoint stored as string for DDNS support
     let config = crate::wireguard_config::WireGuardConfig {
         private_key: private_key_bytes,
         peer_public_key: peer_public_key_bytes,
         preshared_key: psk_bytes,
-        endpoint: endpoint_addr,
+        endpoint: endpoint_str,
         tunnel_address: tunnel_ip,
         keepalive_secs: keepalive_secs as u16,
         mtu: mtu as u16,
@@ -1519,24 +1501,13 @@ pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeHt
         }
     };
 
-    // Parse endpoint (supports both IP:port and hostname:port via DNS resolution)
-    use std::net::ToSocketAddrs;
-    let endpoint_addr: std::net::SocketAddr = match endpoint_str.to_socket_addrs() {
-        Ok(mut addrs) => match addrs.next() {
-            Some(addr) => {
-                info!("nativeHttpSetConfig: resolved endpoint '{}' -> {}", endpoint_str, addr);
-                addr
-            }
-            None => {
-                error!("nativeHttpSetConfig: DNS resolution returned no addresses for '{}'", endpoint_str);
-                return JNI_FALSE;
-            }
-        },
-        Err(e) => {
-            error!("nativeHttpSetConfig: failed to resolve endpoint '{}': {}", endpoint_str, e);
-            return JNI_FALSE;
-        }
-    };
+    // Store endpoint as string for dynamic DNS resolution on each connection
+    // Validation: check format is valid (host:port)
+    if !endpoint_str.contains(':') {
+        error!("nativeHttpSetConfig: invalid endpoint format '{}' (expected host:port)", endpoint_str);
+        return JNI_FALSE;
+    }
+    info!("nativeHttpSetConfig: endpoint '{}' will be resolved dynamically on each connection", endpoint_str);
 
     // Parse tunnel address
     let tunnel_ip: std::net::Ipv4Addr = match tunnel_addr_str.parse() {
@@ -1556,12 +1527,12 @@ pub extern "C" fn Java_com_limelight_binding_wireguard_WireGuardManager_nativeHt
         }
     };
 
-    // Build HTTP config
+    // Build HTTP config - endpoint stored as string for DDNS support
     let config = crate::wg_http::WgHttpConfig {
         private_key: private_key_bytes,
         peer_public_key: peer_public_key_bytes,
         preshared_key: psk_bytes,
-        endpoint: endpoint_addr,
+        endpoint: endpoint_str,
         tunnel_ip,
         server_ip,
         keepalive_secs: keepalive_secs as u16,

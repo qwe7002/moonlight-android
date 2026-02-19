@@ -145,6 +145,7 @@ public class WireGuardManager {
         statusCallback = callback;
     }
 
+
     /**
      * Start the WireGuard tunnel with the given configuration
      * @param config The tunnel configuration
@@ -165,7 +166,8 @@ public class WireGuardManager {
         }
 
         try {
-            // Pass endpoint directly to Rust layer which handles DNS resolution
+            // Pass endpoint directly to Rust - DNS resolution happens dynamically on each connection
+            // This supports DDNS scenarios where IP may change
             boolean result = nativeStartTunnel(
                 config.privateKey,
                 config.peerPublicKey,
@@ -333,7 +335,8 @@ public class WireGuardManager {
         }
 
         try {
-            // Pass endpoint directly to Rust layer which handles DNS resolution
+            // Pass endpoint directly to Rust - DNS resolution happens dynamically on each connection
+            // This supports DDNS scenarios where IP may change
             boolean result = nativeHttpSetConfig(
                 config.privateKey,
                 config.peerPublicKey,

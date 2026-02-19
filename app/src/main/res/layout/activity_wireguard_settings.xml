@@ -37,6 +37,8 @@
             android:layout_height="wrap_content"
             android:text="@string/wireguard_enable"
             android:textSize="16sp"
+            android:textOn=""
+            android:textOff=""
             android:layout_marginBottom="24dp" />
 
         <!-- Connection Status -->

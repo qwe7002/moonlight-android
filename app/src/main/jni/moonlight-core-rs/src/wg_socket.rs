@@ -17,18 +17,17 @@
 //! global lock, to avoid deadlocking OkHttp's concurrent read/write threads.
 
 use std::collections::HashMap;
-use std::io;
 use std::net::Ipv4Addr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 
-use crate::tun_stack::{TcpConnectionId, TcpState, VirtualStack};
-use crate::wg_http::{get_or_create_shared_proxy, GLOBAL_HTTP_CONFIG, SharedTcpProxy};
+use crate::tun_stack::{TcpConnectionId, TcpState};
+use crate::wg_http::{get_or_create_shared_proxy, GLOBAL_HTTP_CONFIG};
 
 /// Handle counter for socket connections
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -49,7 +48,7 @@ struct WgSocketConnection {
     receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     /// Per-connection recv buffer - wrapped in Arc<Mutex> for the same reason
     recv_buf: Arc<Mutex<RecvBuffer>>,
-    created_at: Instant,
+    _created_at: Instant,
 }
 
 /// Global map of socket handles to connections.
@@ -165,7 +164,7 @@ pub fn wg_socket_connect(host: &str, port: u16, timeout_ms: u32) -> u64 {
             pos: 0,
             eof: false,
         })),
-        created_at: Instant::now(),
+        _created_at: Instant::now(),
     };
 
     ensure_connections_map();

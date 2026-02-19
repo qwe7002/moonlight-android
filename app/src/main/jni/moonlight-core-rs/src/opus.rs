@@ -12,8 +12,10 @@ pub struct OpusMSDecoder {
 
 // Opus decoder control request codes
 /// Set decoder gain in Q8 dB units (-32768 to 32767)
+#[allow(dead_code)]
 pub const OPUS_SET_GAIN: c_int = 4034;
 /// Get the duration of the last decoded packet in samples
+#[allow(dead_code)]
 pub const OPUS_GET_LAST_PACKET_DURATION: c_int = 4039;
 
 // External C functions from libopus
@@ -43,6 +45,7 @@ extern "C" {
     pub fn opus_multistream_decoder_destroy(st: *mut OpusMSDecoder);
 
     /// Control decoder settings
+    #[allow(dead_code)]
     pub fn opus_multistream_decoder_ctl(st: *mut OpusMSDecoder, request: c_int, ...) -> c_int;
 }
 

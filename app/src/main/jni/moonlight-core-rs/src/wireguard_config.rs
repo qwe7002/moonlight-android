@@ -3,7 +3,7 @@
 //! This module contains the configuration structures and utilities for WireGuard tunnels.
 //! Separated from the main wireguard module for better modularity and reusability.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::io;
 
 /// Configuration for the WireGuard tunnel
@@ -15,8 +15,8 @@ pub struct WireGuardConfig {
     pub peer_public_key: [u8; 32],
     /// Optional preshared key (32 bytes, raw)
     pub preshared_key: Option<[u8; 32]>,
-    /// Peer endpoint (IP:port)
-    pub endpoint: SocketAddr,
+    /// Peer endpoint as "host:port" string - resolved dynamically for DDNS support
+    pub endpoint: String,
     /// Local tunnel IP address (the virtual IP assigned to this client)
     pub tunnel_address: IpAddr,
     /// Keepalive interval in seconds (0 = disabled)
@@ -37,12 +37,12 @@ impl WireGuardConfig {
     /// # Arguments
     /// * `private_key` - Local private key (32 bytes)
     /// * `peer_public_key` - Peer's public key (32 bytes)
-    /// * `endpoint` - Peer endpoint address (IP:port)
+    /// * `endpoint` - Peer endpoint address as "host:port" string
     /// * `tunnel_address` - Local tunnel IP address
     pub fn new(
         private_key: [u8; 32],
         peer_public_key: [u8; 32],
-        endpoint: SocketAddr,
+        endpoint: String,
         tunnel_address: IpAddr,
     ) -> Self {
         WireGuardConfig {
@@ -61,12 +61,12 @@ impl WireGuardConfig {
     /// # Arguments
     /// * `private_key_b64` - Base64-encoded private key
     /// * `peer_public_key_b64` - Base64-encoded peer public key
-    /// * `endpoint` - Peer endpoint address (IP:port)
+    /// * `endpoint` - Peer endpoint address as "host:port" string
     /// * `tunnel_address` - Local tunnel IP address
     pub fn from_base64(
         private_key_b64: &str,
         peer_public_key_b64: &str,
-        endpoint: SocketAddr,
+        endpoint: String,
         tunnel_address: IpAddr,
     ) -> io::Result<Self> {
         let private_key = decode_base64_key(private_key_b64)?;
@@ -78,6 +78,21 @@ impl WireGuardConfig {
             endpoint,
             tunnel_address,
         ))
+    }
+
+    /// Resolve the endpoint string to a SocketAddr.
+    /// This performs DNS resolution if the endpoint contains a hostname.
+    pub fn resolve_endpoint(&self) -> io::Result<SocketAddr> {
+        self.endpoint.to_socket_addrs()
+            .map_err(|e| io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Failed to resolve endpoint '{}': {}", self.endpoint, e)
+            ))?
+            .next()
+            .ok_or_else(|| io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("DNS resolution returned no addresses for '{}'", self.endpoint)
+            ))
     }
 
     /// Set the preshared key from raw bytes.
@@ -139,7 +154,7 @@ impl Default for WireGuardConfig {
             private_key: [0u8; 32],
             peer_public_key: [0u8; 32],
             preshared_key: None,
-            endpoint: "0.0.0.0:0".parse().unwrap(),
+            endpoint: "0.0.0.0:0".to_string(),
             tunnel_address: "10.0.0.2".parse().unwrap(),
             keepalive_secs: Self::DEFAULT_KEEPALIVE_SECS,
             mtu: Self::DEFAULT_MTU,
@@ -212,7 +227,7 @@ mod tests {
     fn test_config_builder() {
         let private_key = [1u8; 32];
         let public_key = [2u8; 32];
-        let endpoint: SocketAddr = "192.168.1.1:51820".parse().unwrap();
+        let endpoint = "192.168.1.1:51820".to_string();
         let tunnel_addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
 
         let config = WireGuardConfig::new(private_key, public_key, endpoint, tunnel_addr)

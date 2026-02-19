@@ -20,13 +20,10 @@ use parking_lot::Mutex;
 use boringtun::noise::{Tunn, TunnResult};
 use x25519_dalek::{PublicKey, StaticSecret};
 
-use crate::tun_stack::{VirtualStack, TcpState as VirtualTcpState};
+use crate::tun_stack::VirtualStack;
 
 /// Maximum packet size for WireGuard
 const MAX_PACKET_SIZE: usize = 65535;
-
-/// Connection timeout
-const CONNECTION_TIMEOUT_SECS: u64 = 10;
 
 /// WireGuard tunnel configuration
 #[derive(Clone)]
@@ -34,11 +31,28 @@ pub struct WgHttpConfig {
     pub private_key: [u8; 32],
     pub peer_public_key: [u8; 32],
     pub preshared_key: Option<[u8; 32]>,
-    pub endpoint: SocketAddr,
+    /// Endpoint as "host:port" string - resolved dynamically on each connection for DDNS support
+    pub endpoint: String,
     pub tunnel_ip: Ipv4Addr,
     pub server_ip: Ipv4Addr,
     pub keepalive_secs: u16,
     pub mtu: u16,
+}
+
+/// Resolve endpoint string to SocketAddr (supports both IP:port and hostname:port)
+fn resolve_endpoint(endpoint: &str) -> io::Result<SocketAddr> {
+    use std::net::ToSocketAddrs;
+
+    endpoint.to_socket_addrs()
+        .map_err(|e| io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Failed to resolve endpoint '{}': {}", endpoint, e)
+        ))?
+        .next()
+        .ok_or_else(|| io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("DNS resolution returned no addresses for '{}'", endpoint)
+        ))
 }
 
 /// Create a WireGuard tunnel
@@ -56,8 +70,12 @@ fn create_tunnel(config: &WgHttpConfig) -> io::Result<(Box<Tunn>, UdpSocket)> {
     )
     .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Tunn::new failed: {}", e)))?;
 
+    // Resolve endpoint dynamically for DDNS support
+    let endpoint_addr = resolve_endpoint(&config.endpoint)?;
+    info!("Resolved endpoint '{}' -> {}", config.endpoint, endpoint_addr);
+
     let endpoint_socket = UdpSocket::bind("0.0.0.0:0")?;
-    endpoint_socket.connect(config.endpoint)?;
+    endpoint_socket.connect(endpoint_addr)?;
 
     Ok((tunnel, endpoint_socket))
 }
@@ -209,6 +227,9 @@ pub fn wg_http_inject_packet(packet: &[u8]) {
 // 2. Routing issues by sharing the tunnel with streaming
 // ============================================================================
 
+/// DDNS re-resolution timeout in seconds (same as WireGuard's reresolve-dns.sh)
+const DDNS_RERESOLVE_TIMEOUT_SECS: u64 = 135;
+
 /// Shared WireGuard tunnel and virtual TCP stack for all TCP proxy connections.
 /// Using a single tunnel avoids WG peer endpoint conflicts when multiple
 /// connections use the same key pair.
@@ -216,11 +237,17 @@ pub struct SharedTcpProxy {
     /// boringtun tunnel instance (mutex for thread-safe access)
     tunnel: Mutex<Box<Tunn>>,
     /// UDP socket connected to WireGuard endpoint
-    endpoint_socket: UdpSocket,
+    endpoint_socket: Mutex<UdpSocket>,
+    /// Currently resolved endpoint address
+    endpoint_addr: Mutex<SocketAddr>,
+    /// Configuration for re-creating tunnel on DDNS re-resolution
+    config: WgHttpConfig,
     /// Virtual TCP/IP stack
     pub virtual_stack: VirtualStack,
     /// Running flag for background threads
     running: Arc<AtomicBool>,
+    /// Last successful handshake timestamp
+    last_handshake: Mutex<Instant>,
 }
 
 /// Global shared TCP proxy (single WG tunnel for all connections)
@@ -233,6 +260,10 @@ impl SharedTcpProxy {
     fn new(config: &WgHttpConfig) -> io::Result<Arc<Self>> {
         let streaming_active = crate::wireguard::wg_is_tunnel_active();
         
+        // Resolve endpoint for initial connection
+        let endpoint_addr = resolve_endpoint(&config.endpoint)?;
+        info!("Initial endpoint resolution: '{}' -> {}", config.endpoint, endpoint_addr);
+
         // Only create our own tunnel if streaming is not active
         let (tunnel, endpoint_socket) = if streaming_active {
             info!("Streaming tunnel active - HTTP proxy will route through it");
@@ -262,9 +293,12 @@ impl SharedTcpProxy {
 
         let proxy = Arc::new(SharedTcpProxy {
             tunnel: Mutex::new(tunnel),
-            endpoint_socket,
+            endpoint_socket: Mutex::new(endpoint_socket),
+            endpoint_addr: Mutex::new(endpoint_addr),
+            config: config.clone(),
             virtual_stack: VirtualStack::new(config.tunnel_ip),
             running: Arc::new(AtomicBool::new(true)),
+            last_handshake: Mutex::new(Instant::now()),
         });
 
         // Start packet receiver thread
@@ -305,12 +339,13 @@ impl SharedTcpProxy {
         } else {
             // Use our own tunnel
             let tunnel = self.tunnel.lock();
+            let endpoint_socket = self.endpoint_socket.lock();
             let mut buf = vec![0u8; MAX_PACKET_SIZE + 200];
 
             for packet in &packets {
                 match tunnel.encapsulate(packet, &mut buf) {
                     TunnResult::WriteToNetwork(data) => {
-                        if let Err(e) = self.endpoint_socket.send(data) {
+                        if let Err(e) = endpoint_socket.send(data) {
                             warn!("WG TCP proxy: send failed: {}", e);
                         }
                     }
@@ -329,10 +364,10 @@ impl SharedTcpProxy {
         let mut dec_buf = vec![0u8; MAX_PACKET_SIZE];
 
         // Set read timeout for periodic checks
-        proxy
-            .endpoint_socket
-            .set_read_timeout(Some(Duration::from_millis(2)))
-            .ok();
+        {
+            let endpoint_socket = proxy.endpoint_socket.lock();
+            endpoint_socket.set_read_timeout(Some(Duration::from_millis(100))).ok();
+        }
 
         info!("WG TCP proxy receiver started");
 
@@ -349,19 +384,28 @@ impl SharedTcpProxy {
                 continue;
             }
             
-            match proxy.endpoint_socket.recv(&mut recv_buf) {
+            let recv_result = {
+                let endpoint_socket = proxy.endpoint_socket.lock();
+                endpoint_socket.recv(&mut recv_buf)
+            };
+
+            match recv_result {
                 Ok(n) if n > 0 => {
+                    // Update last handshake time on successful packet reception
+                    *proxy.last_handshake.lock() = Instant::now();
+
                     // Decapsulate the WG packet(s)
                     let mut ip_packets = Vec::new();
                     {
                         let tunnel = proxy.tunnel.lock();
+                        let endpoint_socket = proxy.endpoint_socket.lock();
                         match tunnel.decapsulate(None, &recv_buf[..n], &mut dec_buf) {
                             TunnResult::WriteToTunnelV4(data, _)
                             | TunnResult::WriteToTunnelV6(data, _) => {
                                 ip_packets.push(data.to_vec());
                             }
                             TunnResult::WriteToNetwork(data) => {
-                                proxy.endpoint_socket.send(data).ok();
+                                endpoint_socket.send(data).ok();
                                 // Drain follow-up results
                                 loop {
                                     match tunnel.decapsulate(None, &[], &mut dec_buf) {
@@ -370,7 +414,7 @@ impl SharedTcpProxy {
                                             ip_packets.push(data.to_vec());
                                         }
                                         TunnResult::WriteToNetwork(data) => {
-                                            proxy.endpoint_socket.send(data).ok();
+                                            endpoint_socket.send(data).ok();
                                         }
                                         _ => break,
                                     }
@@ -413,7 +457,36 @@ impl SharedTcpProxy {
         info!("WG TCP proxy receiver stopped");
     }
 
-    /// Background thread: WG keepalive and stale connection cleanup
+    /// Re-resolve DNS and reconnect to the new endpoint address.
+    /// This implements the same logic as WireGuard's reresolve-dns.sh script.
+    fn reresolve_endpoint(&self) -> io::Result<()> {
+        let new_addr = resolve_endpoint(&self.config.endpoint)?;
+        let mut current_addr = self.endpoint_addr.lock();
+
+        if new_addr != *current_addr {
+            info!("DDNS re-resolution: endpoint '{}' changed {} -> {}",
+                  self.config.endpoint, *current_addr, new_addr);
+
+            // Create new socket and connect to new address
+            let new_socket = UdpSocket::bind("0.0.0.0:0")?;
+            new_socket.connect(new_addr)?;
+            new_socket.set_read_timeout(Some(Duration::from_millis(100)))?;
+
+            // Replace socket and address
+            let mut endpoint_socket = self.endpoint_socket.lock();
+            *endpoint_socket = new_socket;
+            *current_addr = new_addr;
+
+            info!("DDNS: reconnected to new endpoint {}", new_addr);
+        } else {
+            debug!("DDNS re-resolution: endpoint '{}' unchanged ({})",
+                   self.config.endpoint, new_addr);
+        }
+
+        Ok(())
+    }
+
+    /// Background thread: WG keepalive, DDNS re-resolution, and stale connection cleanup
     fn timer_loop(proxy: Arc<SharedTcpProxy>) {
         let mut buf = vec![0u8; 256];
         let mut handshake_buf = vec![0u8; MAX_PACKET_SIZE];
@@ -426,35 +499,66 @@ impl SharedTcpProxy {
             // Skip WG timer updates when streaming tunnel is active
             // (streaming tunnel handles keepalives, we just handle connection cleanup)
             if !crate::wireguard::wg_is_tunnel_active() {
-                // Update WG timers (keepalive, etc.)
-                let tunnel = proxy.tunnel.lock();
-                loop {
-                    match tunnel.update_timers(&mut buf) {
-                        TunnResult::WriteToNetwork(data) => {
-                            proxy.endpoint_socket.send(data).ok();
-                        }
-                        TunnResult::Err(e) => {
-                            let error_str = format!("{:?}", e);
-                            if error_str.contains("ConnectionExpired") {
-                                if handshake_retry_count < MAX_HANDSHAKE_RETRIES {
-                                    handshake_retry_count += 1;
-                                    warn!("WG TCP proxy: connection expired, re-initiating handshake (attempt {})", 
-                                          handshake_retry_count);
-                                    
-                                    // Try to re-initiate handshake
-                                    match tunnel.format_handshake_initiation(&mut handshake_buf, false) {
-                                        TunnResult::WriteToNetwork(data) => {
-                                            proxy.endpoint_socket.send(data).ok();
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            } else {
-                                debug!("WG TCP proxy timer error: {:?}", e);
+                // Check for DDNS re-resolution (same as WireGuard's reresolve-dns.sh)
+                // If no successful handshake in DDNS_RERESOLVE_TIMEOUT_SECS, re-resolve DNS
+                let last_handshake_elapsed = proxy.last_handshake.lock().elapsed();
+                if last_handshake_elapsed > Duration::from_secs(DDNS_RERESOLVE_TIMEOUT_SECS) {
+                    info!("DDNS: no handshake for {} seconds, re-resolving endpoint",
+                          last_handshake_elapsed.as_secs());
+
+                    if let Err(e) = proxy.reresolve_endpoint() {
+                        warn!("DDNS re-resolution failed: {}", e);
+                    } else {
+                        // Reset handshake retry count after re-resolution
+                        handshake_retry_count = 0;
+
+                        // Initiate new handshake after endpoint change
+                        let tunnel = proxy.tunnel.lock();
+                        let endpoint_socket = proxy.endpoint_socket.lock();
+                        match tunnel.format_handshake_initiation(&mut handshake_buf, false) {
+                            TunnResult::WriteToNetwork(data) => {
+                                endpoint_socket.send(data).ok();
+                                info!("DDNS: initiated handshake to new endpoint");
                             }
-                            break;
+                            _ => {}
                         }
-                        _ => break,
+                        // Update last handshake time to prevent immediate re-resolution loop
+                        *proxy.last_handshake.lock() = Instant::now();
+                    }
+                }
+
+                // Update WG timers (keepalive, etc.)
+                {
+                    let tunnel = proxy.tunnel.lock();
+                    let endpoint_socket = proxy.endpoint_socket.lock();
+                    loop {
+                        match tunnel.update_timers(&mut buf) {
+                            TunnResult::WriteToNetwork(data) => {
+                                endpoint_socket.send(data).ok();
+                            }
+                            TunnResult::Err(e) => {
+                                let error_str = format!("{:?}", e);
+                                if error_str.contains("ConnectionExpired") {
+                                    if handshake_retry_count < MAX_HANDSHAKE_RETRIES {
+                                        handshake_retry_count += 1;
+                                        warn!("WG TCP proxy: connection expired, re-initiating handshake (attempt {})",
+                                              handshake_retry_count);
+
+                                        // Try to re-initiate handshake
+                                        match tunnel.format_handshake_initiation(&mut handshake_buf, false) {
+                                            TunnResult::WriteToNetwork(data) => {
+                                                endpoint_socket.send(data).ok();
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                } else {
+                                    debug!("WG TCP proxy timer error: {:?}", e);
+                                }
+                                break;
+                            }
+                            _ => break,
+                        }
                     }
                 }
             } else {
