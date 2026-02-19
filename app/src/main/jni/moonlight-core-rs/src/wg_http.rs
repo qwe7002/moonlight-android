@@ -310,6 +310,8 @@ pub struct SharedTcpProxy {
     pub virtual_stack: VirtualStack,
     /// Running flag for background threads
     running: Arc<AtomicBool>,
+    /// Flag indicating receiver thread is ready
+    receiver_ready: AtomicBool,
     /// Last successful handshake timestamp
     last_handshake: Mutex<Instant>,
 }
@@ -375,6 +377,7 @@ impl SharedTcpProxy {
             config: config.clone(),
             virtual_stack: VirtualStack::new(config.tunnel_ip),
             running: Arc::new(AtomicBool::new(true)),
+            receiver_ready: AtomicBool::new(false),
             last_handshake: Mutex::new(Instant::now()),
         });
 
@@ -393,6 +396,15 @@ impl SharedTcpProxy {
             .spawn(move || {
                 Self::timer_loop(proxy_timer);
             })?;
+
+        // Wait for receiver thread to be ready (up to 500ms)
+        let start = Instant::now();
+        while !proxy.receiver_ready.load(Ordering::SeqCst) && start.elapsed() < Duration::from_millis(500) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        if !proxy.receiver_ready.load(Ordering::SeqCst) {
+            warn!("SharedTcpProxy: receiver thread not ready after 500ms, proceeding anyway");
+        }
 
         Ok(proxy)
     }
@@ -446,6 +458,8 @@ impl SharedTcpProxy {
             endpoint_socket.set_read_timeout(Some(Duration::from_millis(100))).ok();
         }
 
+        // Signal that we're ready to receive packets
+        proxy.receiver_ready.store(true, Ordering::SeqCst);
         info!("WG TCP proxy receiver started");
 
         while proxy.running.load(Ordering::SeqCst) {
