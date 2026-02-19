@@ -58,6 +58,9 @@ struct TunnelState {
     handshake_completed: AtomicBool,
     /// Last successful handshake/packet timestamp for DDNS re-resolution
     last_handshake: Instant,
+    /// Incremented each time endpoint_socket is replaced (e.g. DDNS re-resolution).
+    /// Used by the receiver thread and send cache to detect stale socket clones.
+    socket_generation: u64,
 }
 
 /// The WireGuard tunnel manager
@@ -96,6 +99,10 @@ impl WireGuardTunnel {
         endpoint_socket.connect(endpoint_addr)?;
         endpoint_socket.set_nonblocking(false)?;
 
+        // Set large socket buffers for high-throughput streaming
+        // Video frames at high bitrate can burst many packets; large buffers prevent kernel drops
+        Self::set_socket_buffer_sizes(&endpoint_socket);
+
         // Set a short read timeout for timer/handshake operations
         // Note: receiver thread clones this socket and sets its own timeout
         endpoint_socket.set_read_timeout(Some(Duration::from_millis(10)))?;
@@ -108,6 +115,7 @@ impl WireGuardTunnel {
             resolved_endpoint: endpoint_addr,
             handshake_completed: AtomicBool::new(false),
             last_handshake: Instant::now(),
+            socket_generation: 0,
         }));
 
         let running = Arc::new(AtomicBool::new(false));
@@ -167,6 +175,56 @@ impl WireGuardTunnel {
         }
     }
 
+    /// Set large send/receive buffer sizes on a UDP socket for streaming throughput.
+    /// On Linux/Android, the kernel will cap at net.core.rmem_max / wmem_max.
+    fn set_socket_buffer_sizes(socket: &UdpSocket) {
+        use std::os::unix::io::AsRawFd;
+        let fd = socket.as_raw_fd();
+        // 2MB buffers - handles bursty video traffic (I-frames can be very large)
+        let buf_size: libc::c_int = 2 * 1024 * 1024;
+        let optlen = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+        unsafe {
+            let rc = libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVBUF,
+                &buf_size as *const _ as *const libc::c_void,
+                optlen,
+            );
+            if rc == 0 {
+                let mut actual: libc::c_int = 0;
+                let mut actual_len = optlen;
+                libc::getsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_RCVBUF,
+                    &mut actual as *mut _ as *mut libc::c_void,
+                    &mut actual_len,
+                );
+                info!("WG endpoint SO_RCVBUF set to {} (requested {})", actual, buf_size);
+            }
+            let rc = libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                &buf_size as *const _ as *const libc::c_void,
+                optlen,
+            );
+            if rc == 0 {
+                let mut actual: libc::c_int = 0;
+                let mut actual_len = optlen;
+                libc::getsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_SNDBUF,
+                    &mut actual as *mut _ as *mut libc::c_void,
+                    &mut actual_len,
+                );
+                info!("WG endpoint SO_SNDBUF set to {} (requested {})", actual, buf_size);
+            }
+        }
+    }
+
     /// Check if the tunnel is running and the handshake is completed.
     pub fn is_ready(&self) -> bool {
         self.running.load(Ordering::Relaxed)
@@ -174,14 +232,46 @@ impl WireGuardTunnel {
     }
 
     /// Wait for the handshake to complete, with a timeout.
+    ///
+    /// Actively re-initiates the handshake with exponential backoff to handle
+    /// packet loss on unreliable networks (mobile, WiFi).
     pub fn wait_for_handshake(&self, timeout: Duration) -> bool {
         let start = Instant::now();
+        let mut next_retry = start + Duration::from_millis(1000);
+        let mut retry_interval = Duration::from_millis(1000);
+        let max_retry_interval = Duration::from_secs(4);
+        let mut retry_count = 0u32;
+
         while start.elapsed() < timeout {
             if self.is_ready() {
+                if retry_count > 0 {
+                    info!("WireGuard handshake completed after {} retries ({:?})",
+                          retry_count, start.elapsed());
+                }
                 return true;
             }
+
+            // Actively re-initiate handshake on a schedule.
+            // This handles the common case where the first handshake initiation
+            // packet was lost (UDP is unreliable). Without this, we'd have to
+            // wait for boringtun's internal timer (~5s) which is too slow.
+            let now = Instant::now();
+            if now >= next_retry {
+                retry_count += 1;
+                info!("Re-initiating WireGuard handshake (attempt {}, {:?} elapsed)",
+                      retry_count, start.elapsed());
+                if let Err(e) = self.initiate_handshake() {
+                    warn!("Handshake re-initiation failed: {}", e);
+                }
+                retry_interval = (retry_interval * 2).min(max_retry_interval);
+                next_retry = now + retry_interval;
+            }
+
             thread::sleep(Duration::from_millis(50));
         }
+
+        warn!("WireGuard handshake timed out after {:?} ({} retries)",
+              start.elapsed(), retry_count);
         false
     }
 
@@ -218,10 +308,11 @@ impl WireGuardTunnel {
         // the tunnel state lock during blocking recv(). Previously, the lock was
         // held for up to 100ms during recv timeout, blocking ALL send operations
         // (UDP streaming data, TCP ACKs) through the tunnel.
-        let recv_socket = {
+        let (mut recv_socket, mut current_socket_gen) = {
             let st = state.lock();
-            st.endpoint_socket.try_clone()
-                .expect("Failed to clone WG endpoint socket for receiver")
+            let sock = st.endpoint_socket.try_clone()
+                .expect("Failed to clone WG endpoint socket for receiver");
+            (sock, st.socket_generation)
         };
         // Use short read timeout (10ms) - just enough to check shutdown flag
         recv_socket.set_read_timeout(Some(Duration::from_millis(10))).ok();
@@ -240,7 +331,25 @@ impl WireGuardTunnel {
                     || e.kind() == io::ErrorKind::TimedOut 
                     || e.kind() == io::ErrorKind::Interrupted
                     || e.kind() == io::ErrorKind::ConnectionRefused => {
-                    // ConnectionRefused on UDP = ICMP port unreachable, just retry
+                    // ConnectionRefused on UDP = ICMP port unreachable, just retry.
+                    // Also check if the socket was replaced (DDNS re-resolution)
+                    // so we start reading from the new socket.
+                    let st = state.lock();
+                    if st.socket_generation != current_socket_gen {
+                        info!("WG receiver: socket replaced (gen {} -> {}), re-cloning",
+                              current_socket_gen, st.socket_generation);
+                        match st.endpoint_socket.try_clone() {
+                            Ok(new_sock) => {
+                                drop(st);
+                                new_sock.set_read_timeout(Some(Duration::from_millis(10))).ok();
+                                recv_socket = new_sock;
+                                current_socket_gen = state.lock().socket_generation;
+                            }
+                            Err(e2) => {
+                                warn!("WG receiver: failed to re-clone socket: {}", e2);
+                            }
+                        }
+                    }
                     continue;
                 }
                 Err(e) => {
@@ -340,106 +449,120 @@ impl WireGuardTunnel {
     fn timer_loop(state: Arc<Mutex<TunnelState>>, running: Arc<AtomicBool>, config: WireGuardConfig) {
         let mut dst_buf = vec![0u8; WG_BUFFER_SIZE];
         let mut handshake_retry_count = 0u32;
-        const MAX_HANDSHAKE_RETRIES: u32 = 5;
 
         info!("WireGuard timer thread started");
 
         while running.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_millis(250));
 
-            let mut st = state.lock();
-            
-            // Check for DDNS re-resolution (same as WireGuard's reresolve-dns.sh)
-            // If no successful packet in DDNS_RERESOLVE_TIMEOUT_SECS, re-resolve DNS
-            let last_handshake_elapsed = st.last_handshake.elapsed();
-            if last_handshake_elapsed > Duration::from_secs(DDNS_RERESOLVE_TIMEOUT_SECS) {
-                info!("DDNS: no handshake for {} seconds, re-resolving endpoint",
-                      last_handshake_elapsed.as_secs());
+            // Track whether we need to update the send cache after releasing the state lock.
+            // This avoids a lock ordering deadlock: send path holds WG_SEND_CACHE then state,
+            // so we must NOT hold state while locking WG_SEND_CACHE.
+            let mut new_send_socket: Option<UdpSocket> = None;
 
-                match config.resolve_endpoint() {
-                    Ok(new_addr) => {
-                        if new_addr != st.resolved_endpoint {
-                            info!("DDNS re-resolution: endpoint '{}' changed {} -> {}",
-                                  config.endpoint, st.resolved_endpoint, new_addr);
+            {
+                let mut st = state.lock();
 
-                            // Create new socket and connect to new address (address family must match)
-                            match UdpSocket::bind(bind_addr_for(&new_addr)) {
-                                Ok(new_socket) => {
-                                    if let Err(e) = new_socket.connect(new_addr) {
-                                        warn!("DDNS: failed to connect to new endpoint: {}", e);
-                                    } else {
-                                        new_socket.set_nonblocking(false).ok();
-                                        new_socket.set_read_timeout(Some(Duration::from_millis(10))).ok();
+                // Check for DDNS re-resolution (same as WireGuard's reresolve-dns.sh)
+                // If no successful packet in DDNS_RERESOLVE_TIMEOUT_SECS, re-resolve DNS
+                let last_handshake_elapsed = st.last_handshake.elapsed();
+                if last_handshake_elapsed > Duration::from_secs(DDNS_RERESOLVE_TIMEOUT_SECS) {
+                    info!("DDNS: no handshake for {} seconds, re-resolving endpoint",
+                          last_handshake_elapsed.as_secs());
 
-                                        // Replace socket and address
-                                        st.endpoint_socket = new_socket;
-                                        st.resolved_endpoint = new_addr;
+                    match config.resolve_endpoint() {
+                        Ok(new_addr) => {
+                            if new_addr != st.resolved_endpoint {
+                                info!("DDNS re-resolution: endpoint '{}' changed {} -> {}",
+                                      config.endpoint, st.resolved_endpoint, new_addr);
 
-                                        info!("DDNS: reconnected to new endpoint {}", new_addr);
+                                // Create new socket and connect to new address (address family must match)
+                                match UdpSocket::bind(bind_addr_for(&new_addr)) {
+                                    Ok(new_socket) => {
+                                        if let Err(e) = new_socket.connect(new_addr) {
+                                            warn!("DDNS: failed to connect to new endpoint: {}", e);
+                                        } else {
+                                            new_socket.set_nonblocking(false).ok();
+                                            new_socket.set_read_timeout(Some(Duration::from_millis(10))).ok();
+                                            Self::set_socket_buffer_sizes(&new_socket);
 
-                                        // Reset handshake state and retry count
-                                        st.handshake_completed.store(false, Ordering::Release);
-                                        handshake_retry_count = 0;
+                                            // Clone for send cache update (before moving into state)
+                                            new_send_socket = new_socket.try_clone().ok();
+
+                                            // Replace socket and address
+                                            st.endpoint_socket = new_socket;
+                                            st.resolved_endpoint = new_addr;
+                                            // Bump generation so receiver thread re-clones
+                                            st.socket_generation += 1;
+
+                                            info!("DDNS: reconnected to new endpoint {} (socket gen={})",
+                                                  new_addr, st.socket_generation);
+
+                                            // Reset handshake state and retry count
+                                            st.handshake_completed.store(false, Ordering::Release);
+                                            handshake_retry_count = 0;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("DDNS: failed to create new socket: {}", e);
                                     }
                                 }
-                                Err(e) => {
-                                    warn!("DDNS: failed to create new socket: {}", e);
-                                }
+                            } else {
+                                debug!("DDNS re-resolution: endpoint '{}' unchanged ({})",
+                                       config.endpoint, new_addr);
                             }
-                        } else {
-                            debug!("DDNS re-resolution: endpoint '{}' unchanged ({})",
-                                   config.endpoint, new_addr);
-                        }
 
-                        // Update last handshake time to prevent immediate re-resolution loop
-                        st.last_handshake = Instant::now();
+                            // Update last handshake time to prevent immediate re-resolution loop
+                            st.last_handshake = Instant::now();
 
-                        // Initiate new handshake
-                        match st.tunnel.format_handshake_initiation(&mut dst_buf, false) {
-                            TunnResult::WriteToNetwork(data) => {
-                                if let Err(e) = st.endpoint_socket.send(data) {
-                                    warn!("DDNS: failed to send handshake: {}", e);
-                                } else {
-                                    info!("DDNS: initiated handshake after re-resolution");
+                            // Initiate new handshake
+                            match st.tunnel.format_handshake_initiation(&mut dst_buf, false) {
+                                TunnResult::WriteToNetwork(data) => {
+                                    if let Err(e) = st.endpoint_socket.send(data) {
+                                        warn!("DDNS: failed to send handshake: {}", e);
+                                    } else {
+                                        info!("DDNS: initiated handshake after re-resolution");
+                                    }
                                 }
+                                _ => {}
                             }
-                            _ => {}
                         }
-                    }
-                    Err(e) => {
-                        warn!("DDNS re-resolution failed: {}", e);
-                        // Still update timestamp to prevent rapid retry loop
-                        st.last_handshake = Instant::now();
+                        Err(e) => {
+                            warn!("DDNS re-resolution failed: {}", e);
+                            // Still update timestamp to prevent rapid retry loop
+                            st.last_handshake = Instant::now();
+                        }
                     }
                 }
-            }
 
-            // Process all timer events in a loop (there may be multiple)
-            loop {
-                match st.tunnel.update_timers(&mut dst_buf) {
-                    TunnResult::WriteToNetwork(data) => {
-                        if let Err(e) = st.endpoint_socket.send(data) {
-                            // EPERM (os error 1) is common on Android when network state changes
-                            // Only log non-EPERM errors to reduce log spam
-                            if e.raw_os_error() != Some(1) {
-                                debug!("Failed to send timer packet: {}", e);
+                // Process all timer events in a loop (there may be multiple)
+                loop {
+                    match st.tunnel.update_timers(&mut dst_buf) {
+                        TunnResult::WriteToNetwork(data) => {
+                            if let Err(e) = st.endpoint_socket.send(data) {
+                                // EPERM (os error 1) is common on Android when network state changes
+                                // Only log non-EPERM errors to reduce log spam
+                                if e.raw_os_error() != Some(1) {
+                                    debug!("Failed to send timer packet: {}", e);
+                                }
                             }
                         }
-                    }
-                    TunnResult::Err(e) => {
-                        warn!("WireGuard timer error: {:?}", e);
-                        
-                        // Check if this is a connection expired error
-                        let error_str = format!("{:?}", e);
-                        if error_str.contains("ConnectionExpired") {
-                            if handshake_retry_count < MAX_HANDSHAKE_RETRIES {
+                        TunnResult::Err(e) => {
+                            warn!("WireGuard timer error: {:?}", e);
+
+                            // Check if this is a connection expired error
+                            let error_str = format!("{:?}", e);
+                            if error_str.contains("ConnectionExpired") {
                                 handshake_retry_count += 1;
-                                warn!("Connection expired, re-initiating handshake (attempt {})", handshake_retry_count);
-                                
+                                warn!("Connection expired, re-initiating handshake (attempt {})",
+                                      handshake_retry_count);
+
                                 // Mark handshake as not completed
                                 st.handshake_completed.store(false, Ordering::Release);
-                                
-                                // Try to re-initiate handshake
+
+                                // Always retry - WireGuard connections can recover after
+                                // network changes, temporary outages, or NAT rebinding.
+                                // A hard cap would permanently kill the tunnel.
                                 match st.tunnel.format_handshake_initiation(&mut dst_buf, false) {
                                     TunnResult::WriteToNetwork(data) => {
                                         if let Err(e) = st.endpoint_socket.send(data) {
@@ -450,20 +573,29 @@ impl WireGuardTunnel {
                                     }
                                     _ => {}
                                 }
-                            } else {
-                                error!("WireGuard connection expired and max retries reached");
                             }
+                            break;
                         }
-                        break;
+                        TunnResult::Done => break,
+                        _ => break,
                     }
-                    TunnResult::Done => break,
-                    _ => break,
                 }
-            }
-            
-            // Reset retry count if handshake is completed
-            if st.handshake_completed.load(Ordering::Acquire) {
-                handshake_retry_count = 0;
+
+                // Reset retry count if handshake is completed
+                if st.handshake_completed.load(Ordering::Acquire) {
+                    handshake_retry_count = 0;
+                }
+            } // state lock released here
+
+            // Update send cache OUTSIDE the state lock to avoid deadlock.
+            // Lock ordering: send path holds WG_SEND_CACHE -> state,
+            // so we must NOT hold state -> WG_SEND_CACHE.
+            if let Some(new_sock) = new_send_socket {
+                let mut cache = WG_SEND_CACHE.lock();
+                if let Some(ref mut c) = *cache {
+                    c.send_socket = new_sock;
+                    info!("DDNS: updated send cache with new socket");
+                }
             }
         }
 
@@ -734,8 +866,8 @@ pub fn wg_start_tunnel(config: WireGuardConfig) -> io::Result<()> {
     let tunnel = WireGuardTunnel::new(config)?;
     tunnel.start()?;
     
-    // Wait for handshake
-    if !tunnel.wait_for_handshake(Duration::from_secs(10)) {
+    // Wait for handshake with active retry (timeout allows ~4 retry attempts with backoff)
+    if !tunnel.wait_for_handshake(Duration::from_secs(15)) {
         tunnel.stop();
         return Err(io::Error::new(io::ErrorKind::TimedOut, "WireGuard handshake timed out"));
     }
@@ -793,21 +925,36 @@ pub fn wg_send_ip_packet(packet: &[u8]) -> io::Result<()> {
     ENCODE_BUF.with(|buf_cell| {
         let mut buf = buf_cell.borrow_mut();
         // Encapsulate under tunnel state lock (fast crypto, ~microseconds)
-        let send_data = {
-            let st = c.state.lock();
-            match st.tunnel.encapsulate(packet, &mut buf) {
-                TunnResult::WriteToNetwork(data) => data.to_vec(),
-                TunnResult::Done => return Ok(()),
-                TunnResult::Err(e) => return Err(io::Error::new(
+        // then send directly from the buffer - zero allocation hot path.
+        // The encrypted `data` slice borrows `buf` (not the lock), so we can
+        // send while still in the match arm without copying.
+        let st = c.state.lock();
+        match st.tunnel.encapsulate(packet, &mut buf) {
+            TunnResult::WriteToNetwork(data) => {
+                // Send directly from encode buffer - eliminates to_vec() heap allocation
+                // Holding the tunnel lock during send() is acceptable: send() on a
+                // connected UDP socket is a fast non-blocking syscall (~1µs), much
+                // cheaper than a 1-64KB heap allocation + memcpy.
+                let result = c.send_socket.send(data);
+                drop(st);
+                result.map(|_| ())
+            }
+            TunnResult::Done => {
+                drop(st);
+                Ok(())
+            }
+            TunnResult::Err(e) => {
+                drop(st);
+                Err(io::Error::new(
                     io::ErrorKind::Other,
                     format!("Encapsulate error: {:?}", e),
-                )),
-                _ => return Ok(()),
+                ))
             }
-        };
-        // State lock released - send on pre-cloned socket (no lock, no dup() syscall)
-        c.send_socket.send(&send_data)?;
-        Ok(())
+            _ => {
+                drop(st);
+                Ok(())
+            }
+        }
     })
 }
 
@@ -825,29 +972,24 @@ pub fn wg_send_ip_packets_batch(packets: &[Vec<u8>]) -> io::Result<()> {
 
     ENCODE_BUF.with(|buf_cell| {
         let mut buf = buf_cell.borrow_mut();
-        // Collect all encrypted packets under a single lock acquisition
-        let mut encrypted: Vec<Vec<u8>> = Vec::with_capacity(packets.len());
-        {
-            let st = c.state.lock();
-            for pkt in packets {
-                match st.tunnel.encapsulate(pkt, &mut buf) {
-                    TunnResult::WriteToNetwork(data) => {
-                        encrypted.push(data.to_vec());
+        // Encrypt and send each packet under a single lock acquisition.
+        // Sending directly from the encode buffer avoids per-packet to_vec() allocation.
+        let st = c.state.lock();
+        for pkt in packets {
+            match st.tunnel.encapsulate(pkt, &mut buf) {
+                TunnResult::WriteToNetwork(data) => {
+                    if let Err(e) = c.send_socket.send(data) {
+                        warn!("Batch send error: {}", e);
                     }
-                    TunnResult::Done => {}
-                    TunnResult::Err(e) => {
-                        warn!("Batch encapsulate error: {:?}", e);
-                    }
-                    _ => {}
                 }
+                TunnResult::Done => {}
+                TunnResult::Err(e) => {
+                    warn!("Batch encapsulate error: {:?}", e);
+                }
+                _ => {}
             }
         }
-        // Lock released - send all encrypted packets
-        for enc in &encrypted {
-            if let Err(e) = c.send_socket.send(enc) {
-                warn!("Batch send error: {}", e);
-            }
-        }
+        drop(st);
         Ok(())
     })
 }

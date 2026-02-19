@@ -31,6 +31,8 @@ base64 = "0.22"
 etherparse = "0.16"
 # Parking lot for efficient synchronization
 parking_lot = "0.12"
+# High-performance channels for zero-copy UDP data delivery (much faster than std::sync::mpsc)
+crossbeam-channel = "0.5"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # Android logging backend
