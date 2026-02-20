@@ -1466,7 +1466,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     // Toggle cursor visibility
                     case KeyEvent.KEYCODE_C:
                         toggleMouseCursor();
-                        break
+                        break;
 
                     default:
                         break;
