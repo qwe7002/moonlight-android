@@ -20,7 +20,7 @@
 //! ```
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -40,6 +40,10 @@ const DEFAULT_RECV_TIMEOUT_MS: u64 = 100;
 /// Channel buffer size - large enough for burst video frames at high bitrate.
 /// Using 4096 reduces packet drops during I-frame bursts.
 const CHANNEL_BUFFER_SIZE: usize = 4096;
+
+/// Maximum number of pending packets buffered per port before any channel is registered.
+/// Protects against unbounded memory growth if a port is never registered.
+const MAX_PENDING_PACKETS_PER_PORT: usize = 512;
 
 /// Maximum UDP/IP packet size for thread-local buffer
 const MAX_IP_PACKET_SIZE: usize = 65535 + 48; // IPv6 header (40) + UDP header (8) + max payload
@@ -133,6 +137,13 @@ static WG_INJECT_FD: Mutex<Option<i32>> = Mutex::new(None);
 static WG_UDP_CONNECTED_PEERS: LazyLock<Mutex<HashMap<i32, SocketAddr>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Pending packets buffer for server ports not yet registered.
+/// When WG decapsulates UDP data for a port that has no channel or inject mapping,
+/// packets are queued here. They are flushed into the channel once wg_sendto()
+/// registers the port → sender mapping.
+static WG_PENDING_PACKETS: LazyLock<Mutex<HashMap<u16, VecDeque<Vec<u8>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 // ============================================================================
 // External C functions from PlatformSockets.c (compiled with renamed symbols)
 // ============================================================================
@@ -197,6 +208,7 @@ pub fn disable_wg_routing() {
     WG_INJECT_SOCKETS.lock().clear();
     WG_INJECT_PORT_MAP.lock().clear();
     WG_UDP_CONNECTED_PEERS.lock().clear();
+    WG_PENDING_PACKETS.lock().clear();
     // Close inject socket
     if let Some(fd) = WG_INJECT_FD.lock().take() {
         unsafe { libc::close(fd); }
@@ -232,6 +244,112 @@ pub fn try_push_udp_data(src_port: u16, data: &[u8]) -> bool {
         }
     } else {
         false
+    }
+}
+
+/// Buffer a UDP packet for a server port that has no channel or inject mapping yet.
+/// Called from the WG receiver thread when both try_push_udp_data and
+/// try_inject_udp_data return false.
+///
+/// The packet is stored in WG_PENDING_PACKETS and will be flushed into the
+/// appropriate channel once wg_sendto() registers the port mapping.
+pub fn buffer_pending_udp_data(src_port: u16, data: &[u8]) {
+    let mut pending = WG_PENDING_PACKETS.lock();
+    let queue = pending.entry(src_port).or_insert_with(VecDeque::new);
+    if queue.len() < MAX_PENDING_PACKETS_PER_PORT {
+        queue.push_back(data.to_vec());
+        debug!(
+            "WG pending: buffered packet for port {} ({} bytes, queue_len={})",
+            src_port,
+            data.len(),
+            queue.len()
+        );
+    } else {
+        // Drop oldest packet to make room (ring-buffer style)
+        queue.pop_front();
+        queue.push_back(data.to_vec());
+        debug!(
+            "WG pending: buffer full for port {}, dropped oldest (queue_len={})",
+            src_port,
+            queue.len()
+        );
+    }
+}
+
+/// Flush pending packets for a server port into the given channel sender.
+/// Called from wg_sendto() when a new port → sender mapping is registered.
+fn flush_pending_udp_data(remote_port: u16, sender: &Sender<Vec<u8>>) {
+    let mut pending = WG_PENDING_PACKETS.lock();
+    if let Some(queue) = pending.remove(&remote_port) {
+        let count = queue.len();
+        let mut delivered = 0usize;
+        for pkt in queue {
+            match sender.try_send(pkt) {
+                Ok(()) => delivered += 1,
+                Err(TrySendError::Full(_)) => {
+                    warn!(
+                        "WG pending flush: channel full for port {} after {} packets",
+                        remote_port, delivered
+                    );
+                    break;
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    warn!("WG pending flush: channel disconnected for port {}", remote_port);
+                    break;
+                }
+            }
+        }
+        if delivered > 0 {
+            info!(
+                "WG pending flush: delivered {}/{} buffered packets for port {}",
+                delivered, count, remote_port
+            );
+        }
+    }
+}
+
+/// Flush pending packets for a server port via inject (loopback) delivery.
+/// Called from wg_sendto() when a new inject socket mapping is registered.
+fn flush_pending_inject_data(remote_port: u16, local_port: u16) {
+    let mut pending = WG_PENDING_PACKETS.lock();
+    if let Some(queue) = pending.remove(&remote_port) {
+        let count = queue.len();
+        let inject_fd = get_or_create_inject_fd();
+        if inject_fd < 0 {
+            warn!("WG pending inject flush: failed to create inject socket");
+            return;
+        }
+
+        let mut addr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+        addr.sin_family = libc::AF_INET as libc::sa_family_t;
+        addr.sin_addr.s_addr = u32::from(Ipv4Addr::LOCALHOST).to_be();
+        addr.sin_port = local_port.to_be();
+
+        let mut delivered = 0usize;
+        for pkt in &queue {
+            let result = unsafe {
+                libc::sendto(
+                    inject_fd,
+                    pkt.as_ptr() as *const libc::c_void,
+                    pkt.len(),
+                    0,
+                    &addr as *const _ as *const libc::sockaddr,
+                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                )
+            };
+            if result >= 0 {
+                delivered += 1;
+            } else {
+                warn!("WG pending inject flush: sendto failed for port {}", remote_port);
+                break;
+            }
+        }
+        if delivered > 0 {
+            info!(
+                "WG pending inject flush: delivered {}/{} buffered packets for port {}",
+                delivered, count, remote_port
+            );
+        }
     }
 }
 
@@ -691,6 +809,10 @@ pub unsafe extern "C" fn wg_sendto(
                     "WG zero-copy: registered port mapping fd={} local_port={} <-> remote_port={}",
                     sockfd, lp, dest_port
                 );
+                // Flush any packets that arrived before this channel was registered.
+                // This fixes the race where the server starts sending on a port
+                // (e.g., 47998) before the client has sent the first ping.
+                flush_pending_udp_data(dest_port, &info.sender);
             }
         }
         lp
@@ -717,6 +839,8 @@ pub unsafe extern "C" fn wg_sendto(
                 "WG auto-registered inject socket: fd={}, local_port={}, remote={}:{}",
                 sockfd, lp, server_ip, dest_port
             );
+            // Flush any packets that arrived before inject registration
+            flush_pending_inject_data(dest_port, lp);
         }
         lp
     };

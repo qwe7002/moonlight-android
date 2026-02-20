@@ -426,7 +426,11 @@ impl WireGuardTunnel {
                                 } else if crate::platform_sockets::try_inject_udp_data(src_port, payload) {
                                     debug!("WG UDP: delivered via loopback injection (src_port={})", src_port);
                                 } else {
-                                    debug!("WG UDP: no channel found for src_port={}", src_port);
+                                    // No channel or inject mapping yet - buffer for later.
+                                    // This handles the race where the server sends data on a
+                                    // port (e.g., 47998) before the client's first sendto()
+                                    // has registered the channel mapping.
+                                    crate::platform_sockets::buffer_pending_udp_data(src_port, payload);
                                 }
                             }
                         }
