@@ -304,8 +304,16 @@ fn flush_pending_udp_data(remote_port: u16, sender: &Sender<Vec<u8>>) {
 /// Flush pending packets for a server port via inject (loopback) delivery.
 /// Called from wg_sendto() when a new inject socket mapping is registered.
 fn flush_pending_inject_data(remote_port: u16, local_port: u16) {
-    let mut pending = WG_PENDING_PACKETS.lock();
-    if let Some(queue) = pending.remove(&remote_port) {
+    // Remove the queue from the pending map first, then drop the lock
+    // before doing blocking sendto() calls. This avoids starving the WG
+    // receiver thread which needs WG_PENDING_PACKETS for buffer_pending_udp_data.
+    let queue = {
+        let mut pending = WG_PENDING_PACKETS.lock();
+        pending.remove(&remote_port)
+    };
+    // WG_PENDING_PACKETS lock is dropped here
+
+    if let Some(queue) = queue {
         let count = queue.len();
         let inject_fd = get_or_create_inject_fd();
         if inject_fd < 0 {
@@ -368,13 +376,17 @@ fn try_claim_pending_port(info: &Arc<WgUdpSocketInfo>, fd: i32) -> bool {
         return false;
     }
 
-    // Check if we're the sole unregistered socket (brief lock, no nested locks)
+    // Check if we're the sole unregistered socket.
+    // IMPORTANT: We must NOT hold WG_UDP_SOCKETS while locking remote_port,
+    // because wg_sendto holds remote_port and calls try_auto_assign_all_pending
+    // which locks WG_UDP_SOCKETS → cross-thread deadlock.
     let unregistered_count = {
-        let sockets = WG_UDP_SOCKETS.lock();
-        sockets
-            .values()
-            .filter(|s| s.remote_port.lock().is_none())
-            .count()
+        let all_sockets: Vec<Arc<WgUdpSocketInfo>> = {
+            let sockets = WG_UDP_SOCKETS.lock();
+            sockets.values().cloned().collect()
+        };
+        // WG_UDP_SOCKETS lock is dropped here
+        all_sockets.iter().filter(|s| s.remote_port.lock().is_none()).count()
     };
 
     if unregistered_count != 1 {
@@ -443,14 +455,19 @@ fn try_auto_assign_all_pending() {
             continue;
         }
 
-        // Collect unregistered sockets
-        let sockets = WG_UDP_SOCKETS.lock();
-        let unregistered: Vec<(i32, Arc<WgUdpSocketInfo>)> = sockets
-            .iter()
+        // Collect all sockets first, then check remote_port WITHOUT holding WG_UDP_SOCKETS.
+        // IMPORTANT: We must NOT hold WG_UDP_SOCKETS while locking remote_port,
+        // because wg_sendto holds remote_port and calls try_auto_assign_all_pending
+        // which would try to lock WG_UDP_SOCKETS → cross-thread deadlock.
+        let all_sockets: Vec<(i32, Arc<WgUdpSocketInfo>)> = {
+            let sockets = WG_UDP_SOCKETS.lock();
+            sockets.iter().map(|(&fd, info)| (fd, info.clone())).collect()
+        };
+        // WG_UDP_SOCKETS lock is dropped here
+        let unregistered: Vec<(i32, Arc<WgUdpSocketInfo>)> = all_sockets
+            .into_iter()
             .filter(|(_, info)| info.remote_port.lock().is_none())
-            .map(|(&fd, info)| (fd, info.clone()))
             .collect();
-        drop(sockets);
 
         if unregistered.len() != 1 {
             // Can't disambiguate - still multiple or no unregistered sockets
