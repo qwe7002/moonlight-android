@@ -1248,6 +1248,28 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgRebindEndpoint(
     }
 }
 
+/// Notify that the device is going to sleep (screen off).
+/// DDNS re-resolution will be paused to avoid futile DNS lookups during doze.
+/// JNI interface: MoonBridge.wgNotifyDeviceSleep()
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgNotifyDeviceSleep(
+    _env: JNIEnv,
+    _clazz: JClass,
+) {
+    crate::wireguard::wg_notify_device_sleep();
+}
+
+/// Notify that the device has woken up (screen on).
+/// Triggers immediate DDNS re-resolution to restore connectivity ASAP.
+/// JNI interface: MoonBridge.wgNotifyDeviceWake()
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgNotifyDeviceWake(
+    _env: JNIEnv,
+    _clazz: JClass,
+) {
+    crate::wireguard::wg_notify_device_wake();
+}
+
 // ============================================================================
 // WireGuardManager JNI Functions
 // ============================================================================

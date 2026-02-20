@@ -20,15 +20,18 @@ import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.nvstream.http.PairingManager;
 import com.limelight.nvstream.mdns.MdnsComputer;
 import com.limelight.nvstream.mdns.MdnsDiscoveryListener;
+import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.preferences.WireGuardSettingsActivity;
 import com.limelight.utils.CacheHelper;
 import com.limelight.utils.ServerHelper;
 
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -70,6 +73,22 @@ public class ComputerManagerService extends Service {
     private final Lock defaultNetworkLock = new ReentrantLock();
 
     private ConnectivityManager.NetworkCallback networkCallback;
+
+    // Screen on/off receiver to notify WireGuard DDNS about device sleep/wake.
+    // Android DNS resolver often fails during doze; pausing DDNS avoids futile lookups
+    // and triggering an immediate check on wake restores connectivity faster.
+    private final BroadcastReceiver screenStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                Log.i(TAG, "Screen off: notifying WireGuard to pause DDNS");
+                MoonBridge.wgNotifyDeviceSleep();
+            } else if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
+                Log.i(TAG, "Screen on: notifying WireGuard to resume DDNS");
+                MoonBridge.wgNotifyDeviceWake();
+            }
+        }
+    };
 
     private DiscoveryService.DiscoveryBinder discoveryBinder;
     private final ServiceConnection discoveryServiceConnection = new ServiceConnection() {
@@ -852,6 +871,12 @@ public class ComputerManagerService extends Service {
         ConnectivityManager connMgr = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         connMgr.registerDefaultNetworkCallback(networkCallback);
 
+        // Register screen on/off receiver for WireGuard DDNS sleep/wake optimization
+        IntentFilter screenFilter = new IntentFilter();
+        screenFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        screenFilter.addAction(Intent.ACTION_SCREEN_ON);
+        registerReceiver(screenStateReceiver, screenFilter);
+
         // Configure WireGuard HTTP JNI if WireGuard is enabled and the tunnel is active.
         // This ensures polling requests go through the JNI WireGuard HTTP client
         // instead of OkHttp (which can't reach through the userspace tunnel).
@@ -942,6 +967,16 @@ public class ComputerManagerService extends Service {
     public void onDestroy() {
         ConnectivityManager connMgr = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         connMgr.unregisterNetworkCallback(networkCallback);
+
+        // Unregister screen state receiver
+        try {
+            unregisterReceiver(screenStateReceiver);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to unregister screen state receiver", e);
+        }
+
+        // Ensure device is marked as awake when service stops
+        MoonBridge.wgNotifyDeviceWake();
 
         // Clean up WireGuard HTTP JNI if we started it
         teardownWireGuardHttp();

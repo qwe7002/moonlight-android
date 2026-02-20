@@ -36,6 +36,11 @@ const WG_BUFFER_SIZE: usize = MAX_UDP_PACKET_SIZE + 256;
 /// DDNS re-resolution timeout in seconds (same as WireGuard's reresolve-dns.sh)
 const DDNS_RERESOLVE_TIMEOUT_SECS: u64 = 135;
 
+/// Minimum interval between DDNS re-resolution attempts (seconds).
+/// When DNS resolution fails (e.g. device sleep/doze mode), we retry at this interval
+/// instead of waiting the full DDNS_RERESOLVE_TIMEOUT_SECS.
+const DDNS_RETRY_INTERVAL_SECS: u64 = 30;
+
 /// Return the unspecified bind address matching the address family of `addr`.
 /// IPv4 endpoints bind to `0.0.0.0:0`, IPv6 endpoints bind to `[::]:0`.
 fn bind_addr_for(addr: &SocketAddr) -> &'static str {
@@ -452,6 +457,10 @@ impl WireGuardTunnel {
     fn timer_loop(state: Arc<Mutex<TunnelState>>, running: Arc<AtomicBool>, config: WireGuardConfig) {
         let mut dst_buf = vec![0u8; WG_BUFFER_SIZE];
         let mut handshake_retry_count = 0u32;
+        // Track last DNS resolution attempt to implement retry backoff
+        let mut last_ddns_attempt = Instant::now();
+        // Track previous sleep state to detect wake transitions
+        let mut was_sleeping = false;
 
         info!("WireGuard timer thread started");
 
@@ -467,9 +476,32 @@ impl WireGuardTunnel {
                 let mut st = state.lock();
 
                 // Check for DDNS re-resolution (same as WireGuard's reresolve-dns.sh)
-                // If no successful packet in DDNS_RERESOLVE_TIMEOUT_SECS, re-resolve DNS
+                // If no successful packet in DDNS_RERESOLVE_TIMEOUT_SECS, re-resolve DNS.
+                // Use a separate retry interval to avoid waiting the full timeout on failure
+                // (e.g., device sleep/doze mode can cause transient DNS failures).
+                let sleeping_now = wg_is_device_sleeping();
+                let just_woke_up = was_sleeping && !sleeping_now;
+                was_sleeping = sleeping_now;
+
+                if sleeping_now {
+                    // Device is sleeping — skip DDNS re-resolution entirely.
+                    // Android DNS resolver often fails during doze, and the inflated
+                    // last_handshake elapsed time (includes sleep) is misleading.
+                } else {
                 let last_handshake_elapsed = st.last_handshake.elapsed();
-                if last_handshake_elapsed > Duration::from_secs(DDNS_RERESOLVE_TIMEOUT_SECS) {
+                let should_check_ddns = if just_woke_up {
+                    // Device just woke up — trigger DDNS check immediately regardless
+                    // of normal timeout/interval to restore connectivity ASAP.
+                    info!("DDNS: device wake detected, triggering immediate re-resolution");
+                    // Reset last_handshake to exclude sleep duration from the elapsed count
+                    st.last_handshake = Instant::now();
+                    true
+                } else {
+                    last_handshake_elapsed > Duration::from_secs(DDNS_RERESOLVE_TIMEOUT_SECS)
+                        && last_ddns_attempt.elapsed() > Duration::from_secs(DDNS_RETRY_INTERVAL_SECS)
+                };
+                if should_check_ddns {
+                    last_ddns_attempt = Instant::now();
                     info!("DDNS: no handshake for {} seconds, re-resolving endpoint",
                           last_handshake_elapsed.as_secs());
 
@@ -531,12 +563,25 @@ impl WireGuardTunnel {
                             }
                         }
                         Err(e) => {
-                            warn!("DDNS re-resolution failed: {}", e);
-                            // Still update timestamp to prevent rapid retry loop
-                            st.last_handshake = Instant::now();
+                            warn!("DDNS re-resolution failed (will retry in {}s): {}",
+                                  DDNS_RETRY_INTERVAL_SECS, e);
+
+                            // DNS failed (possibly device just woke up), but the existing endpoint
+                            // IP may still be valid — try handshake with current endpoint anyway
+                            match st.tunnel.format_handshake_initiation(&mut dst_buf, false) {
+                                TunnResult::WriteToNetwork(data) => {
+                                    if let Err(e) = st.endpoint_socket.send(data) {
+                                        warn!("DDNS: failed to send fallback handshake: {}", e);
+                                    } else {
+                                        info!("DDNS: DNS failed, initiated handshake to current endpoint");
+                                    }
+                                }
+                                _ => {}
+                            }
                         }
                     }
                 }
+                } // else (not sleeping)
 
                 // Process all timer events in a loop (there may be multiple)
                 loop {
@@ -834,6 +879,35 @@ fn parse_udp_from_ipv6(packet: &[u8]) -> Option<(u16, u16, &[u8])> {
         return None;
     }
     Some((src_port, dst_port, &udp[8..udp_len]))
+}
+
+// ============================================================================
+// Device sleep/wake tracking for DDNS optimization
+// ============================================================================
+
+/// Global flag indicating device is in sleep/doze mode (screen off).
+/// When true, DDNS re-resolution is paused to avoid futile DNS lookups
+/// (Android's DNS resolver often fails during doze/sleep).
+/// Set by Java via JNI: wgNotifyDeviceSleep() / wgNotifyDeviceWake().
+static DEVICE_SLEEPING: AtomicBool = AtomicBool::new(false);
+
+/// Notify that device is going to sleep (screen off).
+/// DDNS re-resolution will be paused until device wakes.
+pub fn wg_notify_device_sleep() {
+    info!("Device sleep notification received, pausing DDNS re-resolution");
+    DEVICE_SLEEPING.store(true, Ordering::Release);
+}
+
+/// Notify that device has woken up (screen on).
+/// The timer loops will detect the flag change and trigger immediate DDNS re-resolution.
+pub fn wg_notify_device_wake() {
+    info!("Device wake notification received, resuming DDNS re-resolution");
+    DEVICE_SLEEPING.store(false, Ordering::Release);
+}
+
+/// Check whether device is currently sleeping.
+pub fn wg_is_device_sleeping() -> bool {
+    DEVICE_SLEEPING.load(Ordering::Acquire)
 }
 
 // ============================================================================

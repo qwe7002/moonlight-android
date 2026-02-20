@@ -351,6 +351,11 @@ pub fn wg_http_inject_packet(packet: &[u8]) {
 /// DDNS re-resolution timeout in seconds (same as WireGuard's reresolve-dns.sh)
 const DDNS_RERESOLVE_TIMEOUT_SECS: u64 = 135;
 
+/// Minimum interval between DDNS re-resolution attempts (seconds).
+/// When DNS resolution fails (e.g. device sleep/doze mode), we retry at this interval
+/// instead of every loop iteration or waiting the full DDNS_RERESOLVE_TIMEOUT_SECS.
+const DDNS_RETRY_INTERVAL_SECS: u64 = 30;
+
 /// Shared WireGuard tunnel and virtual TCP stack for all TCP proxy connections.
 /// Using a single tunnel avoids WG peer endpoint conflicts when multiple
 /// connections use the same key pair.
@@ -679,6 +684,10 @@ impl SharedTcpProxy {
         let mut handshake_buf = vec![0u8; MAX_PACKET_SIZE];
         let mut handshake_retry_count = 0u32;
         const MAX_HANDSHAKE_RETRIES: u32 = 5;
+        // Track last DNS resolution attempt to implement retry backoff
+        let mut last_ddns_attempt = Instant::now();
+        // Track previous sleep state to detect wake transitions
+        let mut was_sleeping = false;
 
         while proxy.running.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_secs(1));
@@ -687,14 +696,49 @@ impl SharedTcpProxy {
             // (streaming tunnel handles its own timers, we just handle connection cleanup)
             if !crate::wireguard::wg_is_tunnel_active() {
                 // Check for DDNS re-resolution (same as WireGuard's reresolve-dns.sh)
-                // If no successful handshake in DDNS_RERESOLVE_TIMEOUT_SECS, re-resolve DNS
+                // If no successful handshake in DDNS_RERESOLVE_TIMEOUT_SECS, re-resolve DNS.
+                // Use a separate retry interval to avoid hammering DNS every second on failure
+                // (e.g., device sleep/doze mode can cause transient DNS failures).
+                let sleeping_now = crate::wireguard::wg_is_device_sleeping();
+                let just_woke_up = was_sleeping && !sleeping_now;
+                was_sleeping = sleeping_now;
+
+                if sleeping_now {
+                    // Device is sleeping — skip DDNS re-resolution entirely.
+                    // Android DNS resolver often fails during doze.
+                } else {
                 let last_handshake_elapsed = proxy.last_handshake.lock().elapsed();
-                if last_handshake_elapsed > Duration::from_secs(DDNS_RERESOLVE_TIMEOUT_SECS) {
+                let should_check_ddns = if just_woke_up {
+                    // Device just woke up — trigger DDNS check immediately regardless
+                    // of normal timeout/interval to restore connectivity ASAP.
+                    info!("DDNS: device wake detected, triggering immediate re-resolution");
+                    // Reset last_handshake to exclude sleep duration from the elapsed count
+                    *proxy.last_handshake.lock() = Instant::now();
+                    true
+                } else {
+                    last_handshake_elapsed > Duration::from_secs(DDNS_RERESOLVE_TIMEOUT_SECS)
+                        && last_ddns_attempt.elapsed() > Duration::from_secs(DDNS_RETRY_INTERVAL_SECS)
+                };
+                if should_check_ddns {
+                    last_ddns_attempt = Instant::now();
                     info!("DDNS: no handshake for {} seconds, re-resolving endpoint",
                           last_handshake_elapsed.as_secs());
 
                     if let Err(e) = proxy.reresolve_endpoint() {
-                        warn!("DDNS re-resolution failed: {}", e);
+                        warn!("DDNS re-resolution failed (will retry in {}s): {}",
+                              DDNS_RETRY_INTERVAL_SECS, e);
+
+                        // DNS failed (possibly device just woke up), but the existing endpoint
+                        // IP may still be valid — try handshake with current endpoint anyway
+                        let mut tunnel = proxy.tunnel.lock();
+                        let endpoint_socket = proxy.endpoint_socket.lock();
+                        match tunnel.format_handshake_initiation(&mut handshake_buf, false) {
+                            TunnResult::WriteToNetwork(data) => {
+                                endpoint_socket.send(data).ok();
+                                info!("DDNS: DNS failed, initiated handshake to current endpoint");
+                            }
+                            _ => {}
+                        }
                     } else {
                         // Reset handshake retry count after re-resolution
                         handshake_retry_count = 0;
@@ -713,6 +757,7 @@ impl SharedTcpProxy {
                         *proxy.last_handshake.lock() = Instant::now();
                     }
                 }
+                } // else (not sleeping)
 
                 // Update WG timers (handshake, etc.)
                 {

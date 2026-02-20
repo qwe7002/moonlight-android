@@ -508,6 +508,18 @@ public class MoonBridge {
     public static native boolean wgRebindEndpoint();
 
     /**
+     * Notify that the device is going to sleep (screen off).
+     * DDNS re-resolution will be paused to avoid futile DNS lookups during doze.
+     */
+    public static native void wgNotifyDeviceSleep();
+
+    /**
+     * Notify that the device has woken up (screen on).
+     * Triggers immediate DDNS re-resolution to restore connectivity ASAP.
+     */
+    public static native void wgNotifyDeviceWake();
+
+    /**
      * Parse a base64-encoded WireGuard key into raw 32 bytes.
      *
      * @param base64Key Base64-encoded WireGuard key
