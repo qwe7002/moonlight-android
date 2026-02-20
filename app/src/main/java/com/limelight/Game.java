@@ -53,6 +53,8 @@ import android.content.res.Configuration;
 import android.graphics.Rect;
 import android.hardware.input.InputManager;
 import android.media.AudioManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Handler;
@@ -183,6 +185,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private String host; // Saved for WireGuard lifecycle management
     private boolean wireGuardConfigured = false; // Track if WireGuard was set up
     private boolean wireGuardStartedInCreate = false; // Prevent duplicate start from onStart
+
+    // Network change callback for WireGuard endpoint rebinding
+    private ConnectivityManager.NetworkCallback wgNetworkCallback;
+    private ConnectivityManager wgConnectivityManager;
 
     // Screen-off receiver: disconnect the game session when the screen turns off
     private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
@@ -1081,6 +1087,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         // so we don't need a redundant stopWireGuard() call here that could race with
         // the background thread cleanup.
 
+        // Unregister WireGuard network change callback
+        unregisterWgNetworkCallback();
+
         // Unregister screen-off receiver
         try {
             unregisterReceiver(screenOffReceiver);
@@ -1283,9 +1292,69 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 } else {
                     Log.e(TAG, "Failed to configure direct WireGuard HTTP");
                 }
+
+                // Register network change callback to rebind WG endpoint socket
+                // when the device switches between WiFi and mobile data.
+                registerWgNetworkCallback();
             } catch (Exception e) {
                 Log.e(TAG, "Failed to setup WireGuard routing", e);
             }
+        }
+    }
+
+    /**
+     * Register a NetworkCallback to detect network changes (WiFi ↔ mobile)
+     * and rebind the WireGuard endpoint socket so the tunnel survives handoffs.
+     */
+    private void registerWgNetworkCallback() {
+        if (wgNetworkCallback != null) {
+            return; // Already registered
+        }
+        wgConnectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (wgConnectivityManager == null) {
+            Log.w(TAG, "ConnectivityManager not available, WG rebind on network change disabled");
+            return;
+        }
+
+        wgNetworkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(@NonNull Network network) {
+                Log.i(TAG, "Network available: " + network + ", rebinding WireGuard endpoint");
+                if (MoonBridge.wgIsTunnelActive()) {
+                    boolean ok = MoonBridge.wgRebindEndpoint();
+                    Log.i(TAG, "WireGuard endpoint rebind result: " + ok);
+                }
+            }
+
+            @Override
+            public void onLost(@NonNull Network network) {
+                Log.i(TAG, "Network lost: " + network);
+                // Nothing to do here; onAvailable will fire for the new network.
+            }
+        };
+
+        try {
+            wgConnectivityManager.registerDefaultNetworkCallback(wgNetworkCallback);
+            Log.i(TAG, "Registered WireGuard network change callback");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to register WG network callback", e);
+            wgNetworkCallback = null;
+        }
+    }
+
+    /**
+     * Unregister the WireGuard network change callback.
+     */
+    private void unregisterWgNetworkCallback() {
+        if (wgNetworkCallback != null && wgConnectivityManager != null) {
+            try {
+                wgConnectivityManager.unregisterNetworkCallback(wgNetworkCallback);
+                Log.i(TAG, "Unregistered WireGuard network change callback");
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to unregister WG network callback", e);
+            }
+            wgNetworkCallback = null;
+            wgConnectivityManager = null;
         }
     }
 
@@ -1297,6 +1366,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (!prefConfig.wgEnabled) {
             return;
         }
+
+        // Unregister network callback first
+        unregisterWgNetworkCallback();
 
         synchronized (sWireGuardLock) {
             Log.i(TAG, "Clearing WireGuard routing config (generation=" + sWireGuardGeneration + ")");

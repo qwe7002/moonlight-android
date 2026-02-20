@@ -1048,6 +1048,74 @@ pub fn wg_send_ip_packets_batch(packets: &[Vec<u8>]) -> io::Result<()> {
     })
 }
 
+/// Rebind the WireGuard endpoint socket.
+///
+/// When the network changes (e.g., WiFi → mobile or vice versa), the existing
+/// UDP socket may be bound to an interface that is no longer available.
+/// This function creates a new socket, connects it to the same endpoint,
+/// and replaces the old socket so the tunnel can continue operating on the
+/// new network path.  A fresh handshake is initiated automatically.
+pub fn wg_rebind_endpoint() -> io::Result<()> {
+    let global = GLOBAL_TUNNEL.lock();
+    let tunnel = global.as_ref().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::NotConnected, "WireGuard tunnel not active")
+    })?;
+
+    if !tunnel.running.load(Ordering::Acquire) {
+        return Err(io::Error::new(io::ErrorKind::NotConnected, "WireGuard tunnel not running"));
+    }
+
+    // Build the new socket under the state lock, then update the send cache outside it.
+    let new_send_socket: UdpSocket;
+    {
+        let mut st = tunnel.state.lock();
+        let endpoint_addr = st.resolved_endpoint;
+
+        info!("Rebinding WireGuard endpoint socket to {} (network change)", endpoint_addr);
+
+        let new_socket = UdpSocket::bind(bind_addr_for(&endpoint_addr))?;
+        new_socket.connect(endpoint_addr)?;
+        new_socket.set_nonblocking(false)?;
+        new_socket.set_read_timeout(Some(Duration::from_millis(10)))?;
+        WireGuardTunnel::set_socket_buffer_sizes(&new_socket);
+
+        // Clone for send cache update (before moving into state)
+        new_send_socket = new_socket.try_clone()?;
+
+        // Replace socket in tunnel state
+        st.endpoint_socket = new_socket;
+        st.socket_generation += 1;
+
+        // Re-initiate handshake on the new socket
+        let mut dst_buf = vec![0u8; WG_BUFFER_SIZE];
+        match st.tunnel.format_handshake_initiation(&mut dst_buf, false) {
+            TunnResult::WriteToNetwork(data) => {
+                if let Err(e) = st.endpoint_socket.send(data) {
+                    warn!("Rebind: failed to send handshake initiation: {}", e);
+                } else {
+                    info!("Rebind: sent handshake initiation on new socket (gen={})", st.socket_generation);
+                }
+            }
+            _ => {}
+        }
+
+        // Reset last_handshake so the timer thread doesn't immediately try DDNS re-resolution
+        st.last_handshake = Instant::now();
+    }
+
+    // Update send cache OUTSIDE the state lock to avoid deadlock
+    {
+        let mut cache = WG_SEND_CACHE.lock();
+        if let Some(ref mut c) = *cache {
+            c.send_socket = new_send_socket;
+            info!("Rebind: updated send cache with new socket");
+        }
+    }
+
+    info!("WireGuard endpoint socket rebound successfully");
+    Ok(())
+}
+
 /// Enable direct WireGuard routing for UDP/TCP traffic.
 pub fn wg_enable_direct_routing(server_ip: Ipv4Addr) -> io::Result<()> {
     let global = GLOBAL_TUNNEL.lock();

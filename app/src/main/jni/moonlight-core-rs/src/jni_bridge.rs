@@ -1226,6 +1226,28 @@ pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgEnableDirectRouti
     }
 }
 
+/// Rebind the WireGuard endpoint socket after a network change (WiFi ↔ mobile).
+/// Creates a new UDP socket on the current default network and re-initiates handshake.
+/// JNI interface: MoonBridge.wgRebindEndpoint()
+/// Returns: true on success, false on failure
+#[no_mangle]
+pub extern "C" fn Java_com_limelight_nvstream_jni_MoonBridge_wgRebindEndpoint(
+    _env: JNIEnv,
+    _clazz: JClass,
+) -> JBoolean {
+    info!("wgRebindEndpoint called (network change detected)");
+    match crate::wireguard::wg_rebind_endpoint() {
+        Ok(()) => {
+            info!("WireGuard endpoint rebound successfully");
+            JNI_TRUE
+        }
+        Err(e) => {
+            error!("Failed to rebind WireGuard endpoint: {}", e);
+            JNI_FALSE
+        }
+    }
+}
+
 // ============================================================================
 // WireGuardManager JNI Functions
 // ============================================================================

@@ -500,6 +500,14 @@ public class MoonBridge {
     public static native boolean wgEnableDirectRouting(String serverAddr);
 
     /**
+     * Rebind the WireGuard endpoint socket after a network change (WiFi ↔ mobile).
+     * Creates a new UDP socket on the current default network and re-initiates the handshake.
+     *
+     * @return true on success, false on failure
+     */
+    public static native boolean wgRebindEndpoint();
+
+    /**
      * Parse a base64-encoded WireGuard key into raw 32 bytes.
      *
      * @param base64Key Base64-encoded WireGuard key
