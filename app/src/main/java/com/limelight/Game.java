@@ -1466,12 +1466,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     // Toggle cursor visibility
                     case KeyEvent.KEYCODE_C:
                         toggleMouseCursor();
-                        break;
-
-                    // Toggle cursor visibility (alternative shortcut)
-                    case KeyEvent.KEYCODE_N:
-                        toggleMouseCursor();
-                        break;
+                        break
 
                     default:
                         break;
@@ -1943,7 +1938,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         } else if (which == MENU_TASK_MANAGER) {
                             sendCtrlShiftEsc();
                         } else if (which == MENU_TOGGLE_CURSOR) {
-                            toggleMouseCursor();
+                            sendSunshineToggleCursor();
                         }
                         // Cancel doesn't need action, dialog auto-dismisses
                     })
@@ -1984,6 +1979,30 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 (byte) (KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_SHIFT), (byte) 0);
         conn.sendKeyboardInput(shiftKeyCode, KeyboardPacket.KEY_UP, KeyboardPacket.MODIFIER_CTRL, (byte) 0);
         conn.sendKeyboardInput(ctrlKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+    }
+
+    private void sendSunshineToggleCursor() {
+        // Send Shift+Ctrl+Alt+N to Sunshine to toggle cursor visibility
+        short shiftKeyCode = (short) (0x8000 | KeyboardTranslator.VK_SHIFT_LEFT);
+        short ctrlKeyCode = (short) (0x8000 | KeyboardTranslator.VK_CTRL_LEFT);
+        short altKeyCode = (short) (0x8000 | KeyboardTranslator.VK_ALT_LEFT);
+        short nKeyCode = (short) (0x8000 | 0x4E);  // VK_N
+
+        // Press Shift+Ctrl+Alt+N
+        conn.sendKeyboardInput(shiftKeyCode, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+        conn.sendKeyboardInput(ctrlKeyCode, KeyboardPacket.KEY_DOWN, KeyboardPacket.MODIFIER_SHIFT, (byte) 0);
+        conn.sendKeyboardInput(altKeyCode, KeyboardPacket.KEY_DOWN,
+                (byte) (KeyboardPacket.MODIFIER_SHIFT | KeyboardPacket.MODIFIER_CTRL), (byte) 0);
+        conn.sendKeyboardInput(nKeyCode, KeyboardPacket.KEY_DOWN,
+                (byte) (KeyboardPacket.MODIFIER_SHIFT | KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_ALT), (byte) 0);
+
+        // Release in reverse sequence
+        conn.sendKeyboardInput(nKeyCode, KeyboardPacket.KEY_UP,
+                (byte) (KeyboardPacket.MODIFIER_SHIFT | KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_ALT), (byte) 0);
+        conn.sendKeyboardInput(altKeyCode, KeyboardPacket.KEY_UP,
+                (byte) (KeyboardPacket.MODIFIER_SHIFT | KeyboardPacket.MODIFIER_CTRL), (byte) 0);
+        conn.sendKeyboardInput(ctrlKeyCode, KeyboardPacket.KEY_UP, KeyboardPacket.MODIFIER_SHIFT, (byte) 0);
+        conn.sendKeyboardInput(shiftKeyCode, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
     }
 
     private void toggleMouseCursor() {
