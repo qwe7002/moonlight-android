@@ -317,31 +317,51 @@ public class WireGuardSettingsFragment extends PreferenceFragmentCompat {
     }
 
     private boolean validateConfig() {
+        return validateConfigInternal(true);
+    }
+
+    /**
+     * Validate config without showing Toast messages.
+     * Used for auto-reconnect on resume where user didn't trigger the action.
+     */
+    private boolean validateConfigSilent() {
+        return validateConfigInternal(false);
+    }
+
+    private boolean validateConfigInternal(boolean showToast) {
         // Validate private key
         String privateKey = dataStore.getString(PREF_PRIVATE_KEY, "");
         if (privateKey.isEmpty() || !isValidBase64Key(privateKey)) {
-            Toast.makeText(requireContext(), R.string.wireguard_invalid_private_key, Toast.LENGTH_SHORT).show();
+            if (showToast) {
+                Toast.makeText(requireContext(), R.string.wireguard_invalid_private_key, Toast.LENGTH_SHORT).show();
+            }
             return false;
         }
 
         // Validate peer public key
         String peerPublicKey = dataStore.getString(PREF_PEER_PUBLIC_KEY, "");
         if (peerPublicKey.isEmpty() || !isValidBase64Key(peerPublicKey)) {
-            Toast.makeText(requireContext(), R.string.wireguard_invalid_public_key, Toast.LENGTH_SHORT).show();
+            if (showToast) {
+                Toast.makeText(requireContext(), R.string.wireguard_invalid_public_key, Toast.LENGTH_SHORT).show();
+            }
             return false;
         }
 
         // Validate endpoint
         String endpoint = dataStore.getString(PREF_PEER_ENDPOINT, "");
         if (endpoint.isEmpty() || !endpoint.contains(":")) {
-            Toast.makeText(requireContext(), R.string.wireguard_invalid_endpoint, Toast.LENGTH_SHORT).show();
+            if (showToast) {
+                Toast.makeText(requireContext(), R.string.wireguard_invalid_endpoint, Toast.LENGTH_SHORT).show();
+            }
             return false;
         }
 
         // Validate tunnel address
         String tunnelAddress = dataStore.getString(PREF_TUNNEL_ADDRESS, "");
         if (tunnelAddress.isEmpty()) {
-            Toast.makeText(requireContext(), R.string.wireguard_invalid_address, Toast.LENGTH_SHORT).show();
+            if (showToast) {
+                Toast.makeText(requireContext(), R.string.wireguard_invalid_address, Toast.LENGTH_SHORT).show();
+            }
             return false;
         }
 
@@ -370,18 +390,12 @@ public class WireGuardSettingsFragment extends PreferenceFragmentCompat {
                         updateStatus(Status.CONNECTED);
                     } else {
                         updateStatus(Status.ERROR);
-                        if (enabledPref != null) {
-                            enabledPref.setChecked(false);
-                        }
                     }
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Failed to start tunnel", e);
                 mainHandler.post(() -> {
                     updateStatus(Status.ERROR);
-                    if (enabledPref != null) {
-                        enabledPref.setChecked(false);
-                    }
                     Toast.makeText(requireContext(),
                             getString(R.string.wireguard_config_error, e.getMessage()),
                             Toast.LENGTH_SHORT).show();
@@ -607,7 +621,17 @@ public class WireGuardSettingsFragment extends PreferenceFragmentCompat {
         if (WireGuardManager.isTunnelActive()) {
             updateStatus(Status.CONNECTED);
         } else {
-            updateStatus(Status.DISCONNECTED);
+            // If switch is ON but tunnel is not active (e.g., after app restart),
+            // try to auto-reconnect
+            boolean switchOn = enabledPref != null && enabledPref.isChecked();
+            if (switchOn && validateConfigSilent()) {
+                startTunnel();
+            } else if (switchOn) {
+                // Config is incomplete/invalid, show error but keep switch ON
+                updateStatus(Status.ERROR);
+            } else {
+                updateStatus(Status.DISCONNECTED);
+            }
         }
     }
 
