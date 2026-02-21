@@ -24,6 +24,8 @@ import android.os.VibrationAttributes;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
+import android.os.vibrator.VibratorEnvelopeEffectInfo;
+import android.os.vibrator.VibratorFrequencyProfile;
 import android.util.Log;
 import android.util.SparseArray;
 import android.view.InputDevice;
@@ -2478,60 +2480,34 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
     }
 
     /**
-     * Creates a VibrationEffect using WaveformEnvelopeBuilder for API 36+ devices.
-     * This provides the most precise dual-motor simulation by allowing direct control
-     * over amplitude envelopes with millisecond-level timing precision and frequency control.
+     * Creates a repeating WaveformEnvelope effect simulating dual motor vibration (API 36+).
+     * This provides the most accurate simulation of physical motors by controlling
+     * both amplitude and frequency simultaneously.
      * <p>
-     * XInput motor specifications (Xbox 360/One controller):
-     * - Left motor (wLeftMotorSpeed): Heavy eccentric mass (~40g), ~20-30Hz rotation
-     * - Right motor (wRightMotorSpeed): Light eccentric mass (~10g), ~100-150Hz rotation
-     * <p>
-     * The WaveformEnvelopeBuilder allows us to directly specify vibration frequency,
-     * enabling accurate simulation of the physical motor characteristics.
+     * XInput motor specifications:
+     * - Left motor (lowFreq): ~20-30Hz, heavy eccentric mass
+     * - Right motor (highFreq): ~100-150Hz, light eccentric mass
      *
      * @param lowFreqAmplitude  Low frequency motor amplitude (0-255, perceptually corrected)
      * @param highFreqAmplitude High frequency motor amplitude (0-255, perceptually corrected)
+     * @param vibrator          The vibrator to use (required for frequency profile)
      * @return VibrationEffect created with WaveformEnvelopeBuilder, or null if creation fails
      */
     @android.annotation.SuppressLint("NewApi")
-    private VibrationEffect createWaveformEnvelopeEffect(int lowFreqAmplitude, int highFreqAmplitude) {
+    private VibrationEffect createWaveformEnvelopeEffect(int lowFreqAmplitude, int highFreqAmplitude, Vibrator vibrator) {
         if (Build.VERSION.SDK_INT < 36) {
             return null;
         }
 
         try {
-            // Normalize to 0.0-1.0 scale
-            float lowFreqScale = lowFreqAmplitude / 255.0f;
-            float highFreqScale = highFreqAmplitude / 255.0f;
-
-            if (lowFreqScale <= 0.02f && highFreqScale <= 0.02f) {
+            VibrationEffect singleCycle = buildSingleCycleEnvelopeEffect(lowFreqAmplitude, highFreqAmplitude, vibrator);
+            if (singleCycle == null) {
                 return null;
             }
 
-            // Use WaveformEnvelopeBuilder for precise amplitude + frequency control
-            VibrationEffect.WaveformEnvelopeBuilder builder = new VibrationEffect.WaveformEnvelopeBuilder();
-
-            // Duration for one pattern cycle
-            final int CYCLE_DURATION_MS = 200;  // 200ms per cycle = 5Hz modulation
-
-            // WaveformEnvelopeBuilder does not support a repeat parameter like createWaveform().
-            // To achieve continuous vibration, we repeat the pattern enough times to fill ~60 seconds.
-            // This matches the duration used by rumbleDualVibrators (createOneShot(60000, ...)).
-            // A new rumble command will replace this effect before it expires.
-            final int TARGET_DURATION_MS = 60000;
-            final int NUM_REPEATS = TARGET_DURATION_MS / CYCLE_DURATION_MS;  // 300 repeats
-
-            for (int repeat = 0; repeat < NUM_REPEATS; repeat++) {
-                if (lowFreqScale > 0.02f && highFreqScale > 0.02f) {
-                    buildDualMotorEnvelope(builder, lowFreqScale, highFreqScale, CYCLE_DURATION_MS);
-                } else if (lowFreqScale > 0.02f) {
-                    buildLowFreqEnvelope(builder, lowFreqScale, CYCLE_DURATION_MS);
-                } else {
-                    buildHighFreqEnvelope(builder, highFreqScale, CYCLE_DURATION_MS);
-                }
-            }
-
-            return builder.build();
+            // Wrap with createRepeatingEffect() (API 36+) for infinite looping.
+            // The effect repeats until vibrator.cancel() is called or a new effect replaces it.
+            return VibrationEffect.createRepeatingEffect(singleCycle);
         } catch (Exception e) {
             Log.w(TAG, "WaveformEnvelopeBuilder failed: " + e.getMessage());
             return null;
@@ -2539,157 +2515,283 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
     }
 
     /**
+     * Builds a single-cycle WaveformEnvelope effect with precise frequency control (API 36+).
+     * This is the building block for both repeating rumble (via createRepeatingEffect) and
+     * one-shot test vibration in GamepadTestActivity.
+     * <p>
+     * Performs thorough hardware capability checks:
+     * - Verifies envelope effect support via areEnvelopeEffectsSupported()
+     * - Queries VibratorFrequencyProfile for supported frequency range
+     * - Queries VibratorEnvelopeEffectInfo for control point limits
+     * - Clamps all frequencies and durations to hardware-supported ranges
+     *
+     * @param lowFreqAmplitude  Low frequency motor amplitude (0-255)
+     * @param highFreqAmplitude High frequency motor amplitude (0-255)
+     * @param vibrator          The vibrator to use (required for frequency profile)
+     * @return Single-cycle VibrationEffect with frequency control, or null if unsupported
+     */
+    @android.annotation.SuppressLint("NewApi")
+    public static VibrationEffect buildSingleCycleEnvelopeEffect(int lowFreqAmplitude, int highFreqAmplitude, Vibrator vibrator) {
+        if (Build.VERSION.SDK_INT < 36) {
+            return null;
+        }
+
+        try {
+            // Check if device supports envelope effects at all
+            if (!vibrator.areEnvelopeEffectsSupported()) {
+                Log.d(TAG, "Device does not support envelope effects");
+                return null;
+            }
+
+            float lowFreqScale = lowFreqAmplitude / 255.0f;
+            float highFreqScale = highFreqAmplitude / 255.0f;
+
+            if (lowFreqScale <= 0.02f && highFreqScale <= 0.02f) {
+                return null;
+            }
+
+            // Query frequency profile — null means no frequency control
+            VibratorFrequencyProfile freqProfile = vibrator.getFrequencyProfile();
+            if (freqProfile == null) {
+                Log.d(TAG, "Device vibrator has no frequency profile (no frequency control)");
+                return null;
+            }
+
+            float minHz = freqProfile.getMinFrequencyHz();
+            float maxHz = freqProfile.getMaxFrequencyHz();
+
+            if (minHz <= 0 || maxHz <= 0 || maxHz < minHz) {
+                Log.d(TAG, "Invalid frequency range: " + minHz + "-" + maxHz + " Hz");
+                return null;
+            }
+
+            // Query envelope hardware limits
+            VibratorEnvelopeEffectInfo envInfo = vibrator.getEnvelopeEffectInfo();
+            int maxControlPoints = (envInfo != null) ? envInfo.getMaxSize() : 16;
+            long minSegmentMs = (envInfo != null) ? envInfo.getMinControlPointDurationMillis() : 20;
+            long maxSegmentMs = (envInfo != null) ? envInfo.getMaxControlPointDurationMillis() : 1000;
+
+            // Ensure minimum constraints (API guarantees >=16 points, >=20ms min duration)
+            maxControlPoints = Math.max(maxControlPoints, 4);
+            minSegmentMs = Math.max(minSegmentMs, 1);
+
+            Log.d(TAG, String.format("Envelope capabilities: freq=[%.0f-%.0f Hz], maxPoints=%d, segMs=[%d-%d]",
+                    minHz, maxHz, maxControlPoints, minSegmentMs, maxSegmentMs));
+
+            // Clamp XInput target frequencies to device-supported range
+            float lowFreqHz = clampFreq(25.0f, minHz, maxHz);   // XInput left motor ~25Hz
+            float highFreqHz = clampFreq(120.0f, minHz, maxHz);  // XInput right motor ~120Hz
+
+            // Start at the lower frequency for smooth loop transitions
+            float initialFreqHz = lowFreqHz;
+
+            VibrationEffect.WaveformEnvelopeBuilder builder = new VibrationEffect.WaveformEnvelopeBuilder();
+            builder.setInitialFrequencyHz(initialFreqHz);
+
+            // Cycle duration: 200ms provides a good balance of detail and smoothness
+            final int CYCLE_DURATION_MS = 200;
+
+            if (lowFreqScale > 0.02f && highFreqScale > 0.02f) {
+                buildDualMotorEnvelopeStatic(builder, lowFreqScale, highFreqScale, CYCLE_DURATION_MS,
+                        lowFreqHz, highFreqHz, maxControlPoints, minSegmentMs, maxSegmentMs);
+            } else if (lowFreqScale > 0.02f) {
+                buildLowFreqEnvelopeStatic(builder, lowFreqScale, CYCLE_DURATION_MS,
+                        lowFreqHz, maxControlPoints, minSegmentMs, maxSegmentMs);
+            } else {
+                buildHighFreqEnvelopeStatic(builder, highFreqScale, CYCLE_DURATION_MS,
+                        highFreqHz, maxControlPoints, minSegmentMs, maxSegmentMs);
+            }
+
+            return builder.build();
+        } catch (Exception e) {
+            Log.w(TAG, "buildSingleCycleEnvelopeEffect failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Clamps a frequency to the device-supported range [minHz, maxHz]. */
+    private static float clampFreq(float targetHz, float minHz, float maxHz) {
+        return Math.max(minHz, Math.min(maxHz, targetHz));
+    }
+
+    /**
      * Builds an envelope simulating both low and high frequency motors running together.
-     * Creates an interleaved pattern where:
-     * - Low frequency components create slow, heavy modulation
-     * - High frequency components create rapid, light oscillation
-     * - The combination produces realistic dual-motor vibration feel
+     * <p>
+     * Uses alternating low/high frequency segments within a single cycle to create
+     * the perceptual effect of two motors running simultaneously. The envelope
+     * transitions smoothly between frequencies, leveraging the WaveformEnvelopeBuilder's
+     * automatic interpolation between control points.
      * <p>
      * XInput motor specifications:
      * - Left motor (wLeftMotorSpeed): Heavy eccentric mass, ~20-30Hz rotation
      * - Right motor (wRightMotorSpeed): Light eccentric mass, ~100-150Hz rotation
      * <p>
      * WaveformEnvelopeBuilder.addControlPoint(amplitude, frequency, durationMillis):
-     * - amplitude: Vibration intensity (0.0-1.0)
-     * - frequency: Vibration frequency in Hz (-1 for device default)
-     * - durationMillis: Duration of this control point in milliseconds
+     * - amplitude: Vibration intensity (0.0-1.0), linear with output strength
+     * - frequency: Vibration frequency in Hz (must be in device supported range)
+     * - durationMillis: Smooth transition time to reach this control point
      */
     @android.annotation.SuppressLint("NewApi")
     private void buildDualMotorEnvelope(VibrationEffect.WaveformEnvelopeBuilder builder,
-                                        float lowFreqScale, float highFreqScale, @SuppressWarnings("SameParameterValue") int cycleDurationMs) {
-        // Calculate blend ratio for mixing both motors
-        float blendRatio = lowFreqScale / (lowFreqScale + highFreqScale);  // 0-1, higher = more low freq
+                                        float lowFreqScale, float highFreqScale, @SuppressWarnings("SameParameterValue") int cycleDurationMs,
+                                        float lowFreqHz, float highFreqHz,
+                                        int maxControlPoints, long minSegmentMs, long maxSegmentMs) {
+        buildDualMotorEnvelopeStatic(builder, lowFreqScale, highFreqScale, cycleDurationMs,
+                lowFreqHz, highFreqHz, maxControlPoints, minSegmentMs, maxSegmentMs);
+    }
 
-        // XInput-accurate frequency simulation:
-        // Left motor (low frequency): ~20-30Hz (heavy eccentric mass, creates deep rumble)
-        // Right motor (high frequency): ~100-150Hz (light mass, creates sharp buzz)
-        // Note: Android vibrators typically support 1-500Hz range
-        float lowFreqHz = 25.0f;    // XInput left motor typical frequency
-        float highFreqHz = 120.0f;  // XInput right motor typical frequency
+    @android.annotation.SuppressLint("NewApi")
+    private static void buildDualMotorEnvelopeStatic(VibrationEffect.WaveformEnvelopeBuilder builder,
+                                        float lowFreqScale, float highFreqScale, int cycleDurationMs,
+                                        float lowFreqHz, float highFreqHz,
+                                        int maxControlPoints, long minSegmentMs, long maxSegmentMs) {
+        // Use up to 8 control points for dual motor interleaving, but respect hardware limits
+        int numPoints = Math.min(8, maxControlPoints);
+        long segmentMs = Math.max(minSegmentMs, Math.min(maxSegmentMs, cycleDurationMs / numPoints));
 
-        // Number of control points for smooth envelope
-        int numPoints = 8;
-        long segmentDurationMs = cycleDurationMs / numPoints;
+        // Calculate total motor intensity for blending
+        float totalScale = lowFreqScale + highFreqScale;
+        float lowWeight = lowFreqScale / totalScale;   // 0-1, proportion of low freq motor
 
         for (int i = 0; i < numPoints; i++) {
-            float phase = (float) i / numPoints;
+            float phase = (float) i / numPoints;  // 0.0 to ~0.875
 
-            // Low frequency envelope: smooth sine wave modulation
-            // Mimics the slow, heavy rotation of the left motor's eccentric mass
-            float lowFreqEnvelope = 0.7f + 0.3f * (float) Math.sin(phase * 2 * Math.PI);
+            // === Amplitude envelope ===
+            // Create a smooth combined amplitude that modulates over the cycle.
+            // Low frequency motor: slow sine modulation (one full period per cycle)
+            // simulates the physical rotation of the heavy eccentric mass
+            float lowModulation = 0.7f + 0.3f * (float) Math.sin(phase * 2 * Math.PI);
+            float lowAmplitude = lowFreqScale * lowModulation;
 
-            // High frequency rapid oscillation on top
-            // Mimics the fast, light vibration of the right motor
-            float highFreqOscillation = (i % 2 == 0) ? 1.0f : 0.6f;
+            // High frequency motor: rapid alternating pattern (on/off feel)
+            // simulates the buzzy, sharp vibration of the light eccentric mass
+            float highModulation = (i % 2 == 0) ? 1.0f : 0.55f;
+            float highAmplitude = highFreqScale * highModulation;
 
-            // Blend the two motor contributions
-            float lowContribution = lowFreqScale * lowFreqEnvelope * blendRatio;
-            float highContribution = highFreqScale * highFreqOscillation * (1.0f - blendRatio * 0.5f);
+            // Combine: weighted blend of both motors
+            float combinedAmplitude = lowAmplitude * lowWeight + highAmplitude * (1.0f - lowWeight);
+            combinedAmplitude = Math.min(1.0f, Math.max(0.01f, combinedAmplitude));
 
-            // Combined amplitude with synergy boost
-            float combinedAmplitude = (lowContribution + highContribution);
-            if (lowFreqScale > 0.2f && highFreqScale > 0.2f) {
-                combinedAmplitude *= 1.05f;
-            }
-            combinedAmplitude = Math.min(1.0f, Math.max(0.0f, combinedAmplitude));
-
-            // Blend frequency based on current phase contribution
-            // When low freq dominates, use lower frequency; when high freq dominates, use higher
+            // === Frequency envelope ===
+            // Smoothly interpolate between low and high frequency based on which motor
+            // dominates at this point. This creates a richer tactile sensation than
+            // using a single blended frequency.
+            float lowContribution = lowAmplitude * lowWeight;
+            float highContribution = highAmplitude * (1.0f - lowWeight);
             float freqBlend = lowContribution / (lowContribution + highContribution + 0.001f);
-            float frequency = lowFreqHz * freqBlend + highFreqHz * (1.0f - freqBlend);
+            float frequency = lowFreqHz + (highFreqHz - lowFreqHz) * (1.0f - freqBlend);
 
-            builder.addControlPoint(combinedAmplitude, frequency, segmentDurationMs);
+            builder.addControlPoint(combinedAmplitude, frequency, segmentMs);
         }
     }
 
     /**
      * Builds an envelope simulating only the low frequency motor (XInput left motor).
-     * Characteristics:
-     * - Slow, smooth amplitude modulation (~5-10Hz perceived beat)
-     * - Asymmetric attack/decay mimicking real motor spin-up behavior
-     * - Heavy, thumping sensation
-     * - XInput left motor: ~20-30Hz, heavy eccentric mass (~40g)
+     * <p>
+     * Characteristics of the XInput left motor:
+     * - Heavy eccentric mass (~40g), slow rotation (~20-30Hz)
+     * - Produces deep, heavy rumbling sensation (thumping/pounding)
+     * - Asymmetric spin-up: motor takes time to reach full speed
+     * <p>
+     * The envelope mimics motor inertia: fast attack, sustained peak, gradual decay.
+     * Uses a constant low frequency with amplitude modulation to create the
+     * characteristic "heavy rumble" feel.
      */
     @android.annotation.SuppressLint("NewApi")
     private void buildLowFreqEnvelope(VibrationEffect.WaveformEnvelopeBuilder builder,
-                                      float lowFreqScale, @SuppressWarnings("SameParameterValue") int cycleDurationMs) {
-        // XInput left motor characteristic frequency (~20-30Hz)
-        final float LOW_FREQ_HZ = 25.0f;
+                                      float lowFreqScale, @SuppressWarnings("SameParameterValue") int cycleDurationMs,
+                                      float lowFreqHz,
+                                      int maxControlPoints, long minSegmentMs, long maxSegmentMs) {
+        buildLowFreqEnvelopeStatic(builder, lowFreqScale, cycleDurationMs,
+                lowFreqHz, maxControlPoints, minSegmentMs, maxSegmentMs);
+    }
 
-        // Use 6 segments for smooth low-frequency modulation
-        int numSegments = 6;
-        long segmentDurationMs = cycleDurationMs / numSegments;
+    @android.annotation.SuppressLint("NewApi")
+    private static void buildLowFreqEnvelopeStatic(VibrationEffect.WaveformEnvelopeBuilder builder,
+                                      float lowFreqScale, int cycleDurationMs,
+                                      float lowFreqHz,
+                                      int maxControlPoints, long minSegmentMs, long maxSegmentMs) {
+        // Use up to 6 segments for smooth low-frequency modulation
+        int numSegments = Math.min(6, maxControlPoints);
+        long segmentMs = Math.max(minSegmentMs, Math.min(maxSegmentMs, cycleDurationMs / numSegments));
 
         for (int i = 0; i < numSegments; i++) {
             float phase = (float) i / numSegments;
 
-            // Asymmetric envelope: fast attack, sustained peak, gradual decay
+            // Asymmetric envelope mimicking physical motor characteristics:
+            // The eccentric mass takes time to spin up, maintains momentum at peak,
+            // then gradually slows down due to friction
             float envelope;
             if (phase < 0.15f) {
-                // Fast attack
-                envelope = 0.6f + 0.4f * (phase / 0.15f);
-            } else if (phase < 0.4f) {
-                // Peak with slight resonance ripple
-                envelope = 1.0f - 0.05f * (float) Math.sin((phase - 0.15f) * 20 * Math.PI);
-            } else if (phase < 0.8f) {
-                // Gradual decay
-                float decayPhase = (phase - 0.4f) / 0.4f;
-                envelope = 1.0f - 0.35f * decayPhase;
+                // Fast attack: motor rapidly spinning up
+                envelope = 0.5f + 0.5f * (phase / 0.15f);
+            } else if (phase < 0.45f) {
+                // Sustained peak with slight variations (motor resonance)
+                float peakPhase = (phase - 0.15f) / 0.3f;
+                envelope = 1.0f - 0.05f * (float) Math.sin(peakPhase * Math.PI * 2);
+            } else if (phase < 0.85f) {
+                // Gradual decay: motor winding down
+                float decayPhase = (phase - 0.45f) / 0.4f;
+                envelope = 0.95f - 0.35f * decayPhase;
             } else {
-                // Settle to base level before next cycle
-                float settlePhase = (phase - 0.8f) / 0.2f;
-                envelope = 0.65f - 0.1f * settlePhase;
+                // Return to base level for smooth cycle loop
+                float settlePhase = (phase - 0.85f) / 0.15f;
+                envelope = 0.60f - 0.10f * settlePhase;
             }
 
-            float amplitude = Math.min(1.0f, Math.max(0.0f, lowFreqScale * envelope));
-            builder.addControlPoint(amplitude, LOW_FREQ_HZ, segmentDurationMs);
+            float amplitude = Math.min(1.0f, Math.max(0.01f, lowFreqScale * envelope));
+            builder.addControlPoint(amplitude, lowFreqHz, segmentMs);
         }
     }
 
     /**
      * Builds an envelope simulating only the high frequency motor (XInput right motor).
-     * Characteristics:
-     * - Rapid amplitude oscillation (~20-40Hz perceived)
-     * - Sharp on/off transitions
-     * - Buzzing, tingling sensation
-     * - XInput right motor: ~100-150Hz, light eccentric mass (~10g)
+     * <p>
+     * Characteristics of the XInput right motor:
+     * - Light eccentric mass (~10g), fast rotation (~100-150Hz)
+     * - Produces sharp, buzzing sensation (tingling/vibrating)
+     * - Very responsive: quick on/off transitions
+     * <p>
+     * The envelope uses rapid amplitude variations at a constant high frequency
+     * to create the characteristic "buzzy" feel. More control points are used
+     * compared to low freq to capture the rapid oscillation.
      */
     @android.annotation.SuppressLint("NewApi")
     private void buildHighFreqEnvelope(VibrationEffect.WaveformEnvelopeBuilder builder,
-                                       float highFreqScale, @SuppressWarnings("SameParameterValue") int cycleDurationMs) {
-        // XInput right motor characteristic frequency (~100-150Hz)
-        final float HIGH_FREQ_HZ = 120.0f;
+                                       float highFreqScale, @SuppressWarnings("SameParameterValue") int cycleDurationMs,
+                                       float highFreqHz,
+                                       int maxControlPoints, long minSegmentMs, long maxSegmentMs) {
+        buildHighFreqEnvelopeStatic(builder, highFreqScale, cycleDurationMs,
+                highFreqHz, maxControlPoints, minSegmentMs, maxSegmentMs);
+    }
 
-        // Use more segments for rapid high-frequency feel
-        int numSegments = 12;
-        long segmentDurationMs = cycleDurationMs / numSegments;
+    @android.annotation.SuppressLint("NewApi")
+    private static void buildHighFreqEnvelopeStatic(VibrationEffect.WaveformEnvelopeBuilder builder,
+                                       float highFreqScale, int cycleDurationMs,
+                                       float highFreqHz,
+                                       int maxControlPoints, long minSegmentMs, long maxSegmentMs) {
+        // Use up to 10 segments for the rapid high-frequency oscillation feel
+        int numSegments = Math.min(10, maxControlPoints);
+        long segmentMs = Math.max(minSegmentMs, Math.min(maxSegmentMs, cycleDurationMs / numSegments));
 
         for (int i = 0; i < numSegments; i++) {
             float phase = (float) i / numSegments;
 
-            // Rapid oscillation pattern with varying intensity
+            // Rapid on/off pattern that emulates the buzzy feel of a light eccentric mass
+            // Pattern repeats every 4 segments: peak -> medium -> high -> dip
             float baseOscillation;
-            int pattern = i % 4;
-            switch (pattern) {
-                case 0:
-                    baseOscillation = 1.0f;  // Peak
-                    break;
-                case 1:
-                    baseOscillation = 0.65f;  // Medium-high
-                    break;
-                case 2:
-                    baseOscillation = 0.85f;  // High
-                    break;
-                default:
-                    baseOscillation = 0.4f;   // Dip
-                    break;
+            switch (i % 4) {
+                case 0:  baseOscillation = 1.0f;   break;  // Peak burst
+                case 1:  baseOscillation = 0.6f;   break;  // Drop
+                case 2:  baseOscillation = 0.85f;  break;  // Recover
+                default: baseOscillation = 0.4f;   break;  // Deep dip
             }
 
-            // Add slight overall envelope modulation for texture
+            // Slight overall envelope variation for organic texture
             float envelopeModulation = 0.9f + 0.1f * (float) Math.sin(phase * 4 * Math.PI);
 
-            float amplitude = Math.min(1.0f, Math.max(0.0f, highFreqScale * baseOscillation * envelopeModulation));
-            builder.addControlPoint(amplitude, HIGH_FREQ_HZ, segmentDurationMs);
+            float amplitude = Math.min(1.0f, Math.max(0.01f, highFreqScale * baseOscillation * envelopeModulation));
+            builder.addControlPoint(amplitude, highFreqHz, segmentMs);
         }
     }
 
@@ -2723,20 +2825,20 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
 
         VibrationEffect effect = null;
 
-        // API 36+: Use WaveformEnvelopeBuilder for most precise motor simulation.
-        // This provides direct control over vibration frequency (Hz), enabling
-        // accurate simulation of XInput's low-freq (~25Hz) and high-freq (~120Hz) motors.
-        // The envelope is repeated to fill ~60 seconds for continuous vibration.
+        // API 36+: Use WaveformEnvelopeBuilder with createRepeatingEffect() for the most
+        // precise motor simulation. This provides direct vibration frequency control (Hz),
+        // enabling accurate simulation of XInput's low-freq (~25Hz) and high-freq (~120Hz)
+        // motors, and loops infinitely until cancelled.
         if (Build.VERSION.SDK_INT >= 36) {
             try {
-                effect = createWaveformEnvelopeEffect(perceivedLow, perceivedHigh);
+                effect = createWaveformEnvelopeEffect(perceivedLow, perceivedHigh, vibrator);
             } catch (Exception e) {
                 Log.i(TAG, "WaveformEnvelopeBuilder unavailable, using waveform fallback");
             }
         }
 
-        // Fallback: Use createWaveform(..., repeat=0) which loops indefinitely.
-        // This works on all API levels but cannot specify vibration frequency.
+        // Fallback: Use createWaveform(..., repeat=0) which also loops indefinitely.
+        // Works on all API levels but cannot specify vibration frequency.
         if (effect == null) {
             effect = createDualMotorWaveformEffect(perceivedLow, perceivedHigh);
         }

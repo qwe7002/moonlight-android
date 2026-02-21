@@ -4,6 +4,7 @@ import android.content.Context;
 import android.hardware.input.InputManager;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -589,6 +590,21 @@ public class GamepadTestActivity extends AppCompatActivity implements InputManag
             return;
         }
 
+        // API 36+: Use WaveformEnvelopeBuilder with createRepeatingEffect for continuous vibration
+        if (Build.VERSION.SDK_INT >= 36) {
+            VibrationEffect singleCycle = ControllerHandler.buildSingleCycleEnvelopeEffect(lowFreqAmplitude, highFreqAmplitude, vibrator);
+            if (singleCycle != null) {
+                try {
+                    VibrationEffect repeatingEffect = VibrationEffect.createRepeatingEffect(singleCycle);
+                    vibrator.vibrate(repeatingEffect);
+                    return;
+                } catch (Exception e) {
+                    // Fall through to waveform fallback
+                }
+            }
+        }
+
+        // Fallback: amplitude-modulation waveform (no frequency control)
         VibrationEffect effect = ControllerHandler.createDualMotorWaveformEffect(lowFreqAmplitude, highFreqAmplitude);
         if (effect != null) {
             vibrator.vibrate(effect);
