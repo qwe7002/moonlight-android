@@ -1661,7 +1661,13 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             float remappedMagnitude = (magnitude - effectiveDeadzone) / (1.0f - effectiveDeadzone);
             // Preserve direction, apply new magnitude
             float scale = remappedMagnitude / magnitude;
-            stickVector.initialize(stickVector.getX() * scale, stickVector.getY() * scale);
+            // Clamp components to [-1.0, 1.0] to prevent short overflow.
+            // At diagonal positions magnitude can exceed 1.0 (up to sqrt(2)),
+            // and the remapping amplifies components beyond [-1, 1], causing
+            // sign flip when cast to short in handleAxisSet.
+            float newX = Math.max(-1.0f, Math.min(1.0f, stickVector.getX() * scale));
+            float newY = Math.max(-1.0f, Math.min(1.0f, stickVector.getY() * scale));
+            stickVector.initialize(newX, newY);
         }
 
         // We're not normalizing here because we let the computer handle the deadzones.
@@ -2498,25 +2504,31 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             float lowFreqScale = lowFreqAmplitude / 255.0f;
             float highFreqScale = highFreqAmplitude / 255.0f;
 
-            // Use WaveformEnvelopeBuilder for precise amplitude control
+            if (lowFreqScale <= 0.02f && highFreqScale <= 0.02f) {
+                return null;
+            }
+
+            // Use WaveformEnvelopeBuilder for precise amplitude + frequency control
             VibrationEffect.WaveformEnvelopeBuilder builder = new VibrationEffect.WaveformEnvelopeBuilder();
 
-            // Total waveform duration for one cycle
-            // Using repeating pattern, so we need a complete cycle that loops smoothly
+            // Duration for one pattern cycle
             final int CYCLE_DURATION_MS = 200;  // 200ms per cycle = 5Hz modulation
 
-            if (lowFreqScale > 0.02f && highFreqScale > 0.02f) {
-                // Both motors active: create interleaved waveform
-                // Simulate the beat frequency between the two motors
-                buildDualMotorEnvelope(builder, lowFreqScale, highFreqScale, CYCLE_DURATION_MS);
-            } else if (lowFreqScale > 0.02f) {
-                // Only low frequency: deep, slow rumble
-                buildLowFreqEnvelope(builder, lowFreqScale, CYCLE_DURATION_MS);
-            } else if (highFreqScale > 0.02f) {
-                // Only high frequency: rapid buzz
-                buildHighFreqEnvelope(builder, highFreqScale, CYCLE_DURATION_MS);
-            } else {
-                return null;
+            // WaveformEnvelopeBuilder does not support a repeat parameter like createWaveform().
+            // To achieve continuous vibration, we repeat the pattern enough times to fill ~60 seconds.
+            // This matches the duration used by rumbleDualVibrators (createOneShot(60000, ...)).
+            // A new rumble command will replace this effect before it expires.
+            final int TARGET_DURATION_MS = 60000;
+            final int NUM_REPEATS = TARGET_DURATION_MS / CYCLE_DURATION_MS;  // 300 repeats
+
+            for (int repeat = 0; repeat < NUM_REPEATS; repeat++) {
+                if (lowFreqScale > 0.02f && highFreqScale > 0.02f) {
+                    buildDualMotorEnvelope(builder, lowFreqScale, highFreqScale, CYCLE_DURATION_MS);
+                } else if (lowFreqScale > 0.02f) {
+                    buildLowFreqEnvelope(builder, lowFreqScale, CYCLE_DURATION_MS);
+                } else {
+                    buildHighFreqEnvelope(builder, highFreqScale, CYCLE_DURATION_MS);
+                }
             }
 
             return builder.build();
@@ -2711,28 +2723,20 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
 
         VibrationEffect effect = null;
 
-        // API 36+: Use WaveformEnvelopeBuilder for most precise motor simulation
-        // This provides direct control over amplitude envelopes with millisecond precision
+        // API 36+: Use WaveformEnvelopeBuilder for most precise motor simulation.
+        // This provides direct control over vibration frequency (Hz), enabling
+        // accurate simulation of XInput's low-freq (~25Hz) and high-freq (~120Hz) motors.
+        // The envelope is repeated to fill ~60 seconds for continuous vibration.
         if (Build.VERSION.SDK_INT >= 36) {
             try {
                 effect = createWaveformEnvelopeEffect(perceivedLow, perceivedHigh);
             } catch (Exception e) {
-                Log.i(TAG, "WaveformEnvelopeBuilder unavailable, trying fallback methods");
+                Log.i(TAG, "WaveformEnvelopeBuilder unavailable, using waveform fallback");
             }
         }
 
-        // API 30+: Try haptic composition for devices that support it
-        // Haptic composition provides precise tactile simulation using predefined primitives
-        if (effect == null) {
-            try {
-                effect = createHapticCompositionEffect(perceivedLow, perceivedHigh);
-            } catch (Exception e) {
-                // Haptic composition not fully supported, fall through to waveform
-                Log.i(TAG, "Haptic composition unavailable, using waveform fallback");
-            }
-        }
-
-        // Fall back to waveform-based simulation
+        // Fallback: Use createWaveform(..., repeat=0) which loops indefinitely.
+        // This works on all API levels but cannot specify vibration frequency.
         if (effect == null) {
             effect = createDualMotorWaveformEffect(perceivedLow, perceivedHigh);
         }
