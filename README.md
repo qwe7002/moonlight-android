@@ -27,6 +27,7 @@ Deragabu requires hardware with MediaCodec C2 low-latency decoder support. The m
 
 ## Features
 * Stream games from your PC to your Android device
+* **WireGuard VPN integration** - Built-in WireGuard tunnel support for secure remote streaming without a separate VPN app; configure your WireGuard profile directly within the app to establish an encrypted tunnel before connecting to your host
 * **Persistent USB controller permissions** - No need to re-authorize USB controllers every time they reconnect (Includes full Razer Kishi series support)
 * On-screen keyboard input with text entry bar and "Send + Enter" shortcut
 * Auto-copy PIN to clipboard and auto-open browser during pairing process
